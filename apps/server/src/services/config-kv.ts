@@ -7,7 +7,11 @@ import { createServiceUnavailableError } from '../utils/error'
 import { configRedisKey } from '../utils/redis-keys'
 
 export interface FluxPackage {
-  /** Amount in cents sent to Stripe */
+  /** Stable package identifier, e.g. "flux-500" */
+  id: string
+  /** Stripe Price ID, e.g. "price_1Abc..." */
+  stripePriceId: string
+  /** Amount in cents (informational / display-only; actual price is on the Stripe Price object) */
   amount: number
   /** How much Flux the buyer receives for this package */
   fluxAmount: number
@@ -15,9 +19,19 @@ export interface FluxPackage {
   label: string
   /** Display price, e.g. "$5" */
   price: string
+  /** Currency code, e.g. "usd" or "cny". Defaults to "usd". */
+  currency: string
 }
 
-const FluxPackageSchema = object({ amount: number(), fluxAmount: number(), label: string(), price: string() })
+const FluxPackageSchema = object({
+  id: string(),
+  stripePriceId: string(),
+  amount: number(),
+  fluxAmount: number(),
+  label: string(),
+  price: string(),
+  currency: optional(string(), 'usd'),
+})
 
 /**
  * Config entry schemas are the single source of truth for:

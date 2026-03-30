@@ -1,5 +1,5 @@
-import { integer, minValue, number, object, pipe } from 'valibot'
+import { minLength, object, pipe, string } from 'valibot'
 
 export const CheckoutBodySchema = object({
-  amount: pipe(number(), integer(), minValue(1)),
+  packageId: pipe(string(), minLength(1)),
 })

@@ -45,25 +45,18 @@ export function createStripeRoutes(
 
       const user = c.get('user')!
       const body = await c.req.json()
-      const maxCheckoutAmount = await configKV.get('MAX_CHECKOUT_AMOUNT_CENTS')
 
       const result = safeParse(CheckoutBodySchema, body)
       if (!result.success)
-        throw createBadRequestError('Invalid checkout amount', 'INVALID_REQUEST', result.issues)
+        throw createBadRequestError('Invalid checkout request', 'INVALID_REQUEST', result.issues)
 
-      const { amount } = result.output
-      if (amount > maxCheckoutAmount) {
-        throw createBadRequestError('Invalid checkout amount', 'INVALID_REQUEST', {
-          amount,
-          maxCheckoutAmount,
-        })
-      }
+      const { packageId } = result.output
 
-      // Match amount to a configured package so we know the fluxAmount
+      // Look up the package by its stable identifier
       const packages = await configKV.get('FLUX_PACKAGES')
-      const pkg = packages.find(p => p.amount === amount)
+      const pkg = packages.find(p => p.id === packageId)
       if (!pkg) {
-        throw createBadRequestError('No matching package for the given amount', 'INVALID_PACKAGE', { amount })
+        throw createBadRequestError('No matching package for the given ID', 'INVALID_PACKAGE', { packageId })
       }
 
       // Reuse existing stripe customer if available
@@ -75,19 +68,17 @@ export function createStripeRoutes(
         throw createBadRequestError('Missing trusted request origin', 'INVALID_ORIGIN')
       }
 
+      // Build payment method options based on package currency
+      const paymentMethodTypes: Stripe.Checkout.SessionCreateParams.PaymentMethodType[] = ['card']
+      if (pkg.currency === 'cny')
+        paymentMethodTypes.push('wechat_pay')
+      else
+        paymentMethodTypes.push('alipay')
+
       const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
+        payment_method_types: paymentMethodTypes,
         line_items: [
-          {
-            price_data: {
-              currency: 'usd',
-              product_data: {
-                name: 'Flux Top-up',
-              },
-              unit_amount: amount,
-            },
-            quantity: 1,
-          },
+          { price: pkg.stripePriceId, quantity: 1 },
         ],
         mode: 'payment',
         allow_promotion_codes: true,
@@ -98,7 +89,14 @@ export function createStripeRoutes(
         metadata: {
           userId: user.id,
           fluxAmount: String(pkg.fluxAmount),
+          packageId: pkg.id,
         },
+        // NOTICE: WeChat Pay requires explicit client type in payment_method_options
+        ...(pkg.currency === 'cny' && {
+          payment_method_options: {
+            wechat_pay: { client: 'web' },
+          },
+        }),
       })
 
       // Persist the checkout session

@@ -88,8 +88,8 @@ describe('configKVService', () => {
 
   it('get FLUX_PACKAGES should parse JSON array', async () => {
     const packages = [
-      { amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5' },
-      { amount: 1000, fluxAmount: 12000, label: '12000 Flux', price: '$10' },
+      { id: 'flux-500', stripePriceId: 'price_test_500', amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5', currency: 'usd' },
+      { id: 'flux-1000', stripePriceId: 'price_test_1000', amount: 1000, fluxAmount: 12000, label: '12000 Flux', price: '$10', currency: 'usd' },
     ]
     redis._store.set(configRedisKey('FLUX_PACKAGES'), JSON.stringify(packages))
 
@@ -98,7 +98,7 @@ describe('configKVService', () => {
   })
 
   it('set FLUX_PACKAGES should serialize as JSON', async () => {
-    const packages = [{ amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5' }]
+    const packages = [{ id: 'flux-500', stripePriceId: 'price_test_500', amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5', currency: 'usd' }]
     await service.set('FLUX_PACKAGES', packages)
 
     const stored = redis._store.get(configRedisKey('FLUX_PACKAGES'))
@@ -107,9 +107,9 @@ describe('configKVService', () => {
 
   it('fLUX_PACKAGES round-trip should preserve structure', async () => {
     const packages = [
-      { amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5' },
-      { amount: 1000, fluxAmount: 12000, label: '12000 Flux', price: '$10' },
-      { amount: 5000, fluxAmount: 75000, label: '75000 Flux', price: '$50' },
+      { id: 'flux-500', stripePriceId: 'price_test_500', amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5', currency: 'usd' },
+      { id: 'flux-1000', stripePriceId: 'price_test_1000', amount: 1000, fluxAmount: 12000, label: '12000 Flux', price: '$10', currency: 'usd' },
+      { id: 'flux-5000', stripePriceId: 'price_test_5000', amount: 5000, fluxAmount: 75000, label: '75000 Flux', price: '$50', currency: 'usd' },
     ]
     await service.set('FLUX_PACKAGES', packages)
 

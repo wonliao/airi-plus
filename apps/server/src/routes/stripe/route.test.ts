@@ -46,7 +46,7 @@ function createMockBillingService(): BillingService {
 
 function createMockConfigKV(overrides: Record<string, any> = {}): ConfigKVService {
   const defaults: Record<string, any> = {
-    FLUX_PACKAGES: [{ amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5' }],
+    FLUX_PACKAGES: [{ id: 'flux-500', stripePriceId: 'price_test_500', amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5', currency: 'usd' }],
     MAX_CHECKOUT_AMOUNT_CENTS: 1_000_000,
     ...overrides,
   }
@@ -167,7 +167,7 @@ describe('stripeRoutes', () => {
       expect(res.status).toBe(200)
 
       const data = await res.json()
-      expect(data).toEqual([{ amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5' }])
+      expect(data).toEqual([{ id: 'flux-500', stripePriceId: 'price_test_500', amount: 500, fluxAmount: 5000, label: '5000 Flux', price: '$5', currency: 'usd' }])
     })
 
     it('returns empty array when no packages configured', async () => {
@@ -197,12 +197,12 @@ describe('stripeRoutes', () => {
       const res = await app.request('/api/v1/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: 500 }),
+        body: JSON.stringify({ packageId: 'flux-500' }),
       })
       expect(res.status).toBe(401)
     })
 
-    it('returns 400 for invalid amount (zero)', async () => {
+    it('returns 400 for missing packageId', async () => {
       const app = createTestApp(
         createMockFluxService(),
         createMockStripeService(),
@@ -214,14 +214,14 @@ describe('stripeRoutes', () => {
         new Request('http://localhost/api/v1/stripe/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: 0 }),
+          body: JSON.stringify({}),
         }),
         { user: testUser } as any,
       )
       expect(res.status).toBe(400)
     })
 
-    it('returns 400 for invalid amount (negative)', async () => {
+    it('returns 400 for empty packageId', async () => {
       const app = createTestApp(
         createMockFluxService(),
         createMockStripeService(),
@@ -233,14 +233,14 @@ describe('stripeRoutes', () => {
         new Request('http://localhost/api/v1/stripe/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: -100 }),
+          body: JSON.stringify({ packageId: '' }),
         }),
         { user: testUser } as any,
       )
       expect(res.status).toBe(400)
     })
 
-    it('returns 400 for amount exceeding max ($10,000)', async () => {
+    it('returns 400 for unknown packageId', async () => {
       const app = createTestApp(
         createMockFluxService(),
         createMockStripeService(),
@@ -252,50 +252,14 @@ describe('stripeRoutes', () => {
         new Request('http://localhost/api/v1/stripe/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: 1_000_001 }),
+          body: JSON.stringify({ packageId: 'nonexistent-package' }),
         }),
         { user: testUser } as any,
       )
       expect(res.status).toBe(400)
-    })
 
-    it('respects configured max checkout amount', async () => {
-      const app = createTestApp(
-        createMockFluxService(),
-        createMockStripeService(),
-        createMockBillingService(),
-        createMockConfigKV({ MAX_CHECKOUT_AMOUNT_CENTS: 500 }),
-      )
-
-      const res = await app.fetch(
-        new Request('http://localhost/api/v1/stripe/checkout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: 501 }),
-        }),
-        { user: testUser } as any,
-      )
-
-      expect(res.status).toBe(400)
-    })
-
-    it('returns 400 for non-integer amount', async () => {
-      const app = createTestApp(
-        createMockFluxService(),
-        createMockStripeService(),
-        createMockBillingService(),
-        createMockConfigKV(),
-      )
-
-      const res = await app.fetch(
-        new Request('http://localhost/api/v1/stripe/checkout', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ amount: 9.99 }),
-        }),
-        { user: testUser } as any,
-      )
-      expect(res.status).toBe(400)
+      const data = await res.json() as any
+      expect(data.error).toBe('INVALID_PACKAGE')
     })
 
     it('returns 503 when Stripe is not configured', async () => {
@@ -321,7 +285,7 @@ describe('stripeRoutes', () => {
       const res = await app.request('/api/v1/stripe/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: 500 }),
+        body: JSON.stringify({ packageId: 'flux-500' }),
       })
       expect(res.status).toBe(503)
     })
