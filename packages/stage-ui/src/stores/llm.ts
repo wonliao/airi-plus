@@ -147,6 +147,35 @@ function streamOptionsToolsCompatibilityOk(model: string, chatProvider: ChatProv
   return options?.toolsCompatibility?.get(key) !== false
 }
 
+function sanitizeSchemaForOpenAIStrictMode(schema: unknown): void {
+  if (!schema || typeof schema !== 'object') {
+    return
+  }
+
+  const candidate = schema as {
+    items?: unknown
+    properties?: Record<string, unknown>
+    propertyNames?: unknown
+    required?: string[]
+  }
+
+  if ('propertyNames' in candidate) {
+    delete candidate.propertyNames
+  }
+
+  if (candidate.properties) {
+    candidate.required = Object.keys(candidate.properties)
+
+    for (const nestedSchema of Object.values(candidate.properties)) {
+      sanitizeSchemaForOpenAIStrictMode(nestedSchema)
+    }
+  }
+
+  if (candidate.items) {
+    sanitizeSchemaForOpenAIStrictMode(candidate.items)
+  }
+}
+
 const sparkCommandGuidanceOptionSchema = z.object({
   label: z.string().describe('Short label for the option.'),
   steps: z.array(z.string()).min(1).describe('Step-by-step actions the target should follow.'),
@@ -163,17 +192,8 @@ const sparkCommandContextSchema = z.object({
   hints: z.array(z.string()).optional().describe('Hints to attach to the target context.'),
   strategy: z.nativeEnum(ContextUpdateStrategy).describe('How the target should merge this context update.'),
   text: z.string().describe('Primary text of the context update.'),
-  destinations: z.union([
-    z.array(z.string()),
-    z.object({
-      all: z.literal(true),
-    }).strict(),
-    z.object({
-      include: z.array(z.string()).optional(),
-      exclude: z.array(z.string()).optional(),
-    }).strict(),
-  ]).optional().describe('Optional routing for the attached context update.'),
-  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().describe('JSON-like metadata for the context update.'),
+  destinationsJson: z.string().optional().describe('Optional JSON value for context routing, e.g. ["character"] or {"include":["character"],"exclude":["minecraft"]}.'),
+  metadataJson: z.string().optional().describe('Optional JSON object string for the context metadata, e.g. {"priority":"high"}'),
 }).strict()
 
 const sparkCommandToolSchema = z.object({
@@ -185,11 +205,157 @@ const sparkCommandToolSchema = z.object({
   parentEventId: z.string().optional().describe('Optional parent event ID when this command is a response to another event.'),
   guidance: z.object({
     type: z.enum(['proposal', 'instruction', 'memory-recall']),
-    persona: z.record(z.string(), z.enum(['very-high', 'high', 'medium', 'low', 'very-low'])).optional().describe('Persona traits that shape the target behavior.'),
+    personaJson: z.string().optional().describe('Optional JSON object string for persona traits, e.g. {"curiosity":"high"}'),
     options: z.array(sparkCommandGuidanceOptionSchema).min(1).describe('Concrete execution options for the target.'),
   }).strict().optional().describe('Structured guidance for how the target should interpret and execute the command.'),
   contexts: z.array(sparkCommandContextSchema).optional().describe('Optional context updates to attach to the command.'),
 }).strict()
+
+type SparkCommandJsonValue = string | number | boolean | null
+type SparkCommandJsonRecord = Record<string, SparkCommandJsonValue>
+type SparkCommandPersonaValue = 'very-high' | 'high' | 'medium' | 'low' | 'very-low'
+type SparkCommandPersonaRecord = Record<string, SparkCommandPersonaValue>
+type SparkCommandDestinations
+  = string[]
+    | { all: true }
+    | { exclude?: string[], include?: string[] }
+
+function parseSparkCommandJsonRecord(value?: string): SparkCommandJsonRecord | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+
+    const entries = Object.entries(parsed).filter(([, entryValue]) =>
+      entryValue === null
+      || typeof entryValue === 'string'
+      || typeof entryValue === 'number'
+      || typeof entryValue === 'boolean',
+    )
+
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
+function parseSparkCommandPersonaRecord(value?: string): SparkCommandPersonaRecord | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  const allowedValues = new Set<SparkCommandPersonaValue>(['very-high', 'high', 'medium', 'low', 'very-low'])
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+
+    const entries = Object.entries(parsed).filter((entry) => {
+      const entryValue = entry[1]
+      return typeof entryValue === 'string' && allowedValues.has(entryValue as SparkCommandPersonaValue)
+    }) as Array<[string, SparkCommandPersonaValue]>
+
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
+function parseSparkCommandDestinations(value?: string): SparkCommandDestinations | undefined {
+  if (!value) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+
+    if (Array.isArray(parsed) && parsed.every(entry => typeof entry === 'string')) {
+      return parsed
+    }
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+
+    const record = parsed as Record<string, unknown>
+
+    if (record.all === true) {
+      return { all: true }
+    }
+
+    const include = Array.isArray(record.include) ? record.include.filter(entry => typeof entry === 'string') : undefined
+    const exclude = Array.isArray(record.exclude) ? record.exclude.filter(entry => typeof entry === 'string') : undefined
+
+    if ((include?.length ?? 0) > 0 || (exclude?.length ?? 0) > 0) {
+      return {
+        ...(include?.length ? { include } : {}),
+        ...(exclude?.length ? { exclude } : {}),
+      }
+    }
+
+    return undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
+export async function createCallSparkCommandTool(sendSparkCommand: (command: WebSocketEvents['spark:command']) => void) {
+  const callSparkCommandTool = await tool({
+    name: 'call_spark_command',
+    description: 'Send a spark:command to one or more frontend-connected modules or sub-agents.',
+    parameters: sparkCommandToolSchema,
+    execute: async (payload) => {
+      const command = {
+        id: nanoid(),
+        eventId: nanoid(),
+        parentEventId: payload.parentEventId,
+        commandId: nanoid(),
+        interrupt: payload.interrupt ?? false,
+        priority: payload.priority ?? 'normal',
+        intent: payload.intent ?? 'action',
+        ack: payload.ack,
+        guidance: payload.guidance
+          ? {
+              ...payload.guidance,
+              persona: parseSparkCommandPersonaRecord(payload.guidance.personaJson),
+            }
+          : undefined,
+        contexts: payload.contexts?.map(context => ({
+          id: nanoid(),
+          contextId: nanoid(),
+          lane: context.lane,
+          ideas: context.ideas,
+          hints: context.hints,
+          strategy: context.strategy,
+          text: context.text,
+          destinations: parseSparkCommandDestinations(context.destinationsJson),
+          metadata: parseSparkCommandJsonRecord(context.metadataJson),
+        })),
+        destinations: payload.destinations,
+      } satisfies WebSocketEvents['spark:command']
+
+      sendSparkCommand(command)
+
+      return `spark:command sent (${command.commandId}) to ${command.destinations.join(', ')}`
+    },
+  })
+
+  // NOTICE: OpenAI strict tool schemas reject `propertyNames` from z.record() and
+  // expect nested object schemas to list every property in `required`.
+  sanitizeSchemaForOpenAIStrictMode(callSparkCommandTool.function.parameters)
+
+  return callSparkCommandTool
+}
 
 async function streamFrom(model: string, chatProvider: ChatProvider, messages: Message[], sendSparkCommand: (command: WebSocketEvents['spark:command']) => void, options?: StreamOptions) {
   const chatConfig = chatProvider.chat(model)
@@ -210,40 +376,7 @@ async function streamFrom(model: string, chatProvider: ChatProvider, messages: M
         ...await debug(),
         ...(includeOpenClawBridgeTool ? await openclaw(sendSparkCommand, options?.waitForOpenClawResult) : []),
         ...await resolveTools(),
-        await tool({
-          name: 'call_spark_command',
-          description: 'Send a spark:command to one or more frontend-connected modules or sub-agents.',
-          parameters: sparkCommandToolSchema,
-          execute: async (payload) => {
-            const command = {
-              id: nanoid(),
-              eventId: nanoid(),
-              parentEventId: payload.parentEventId,
-              commandId: nanoid(),
-              interrupt: payload.interrupt ?? false,
-              priority: payload.priority ?? 'normal',
-              intent: payload.intent ?? 'action',
-              ack: payload.ack,
-              guidance: payload.guidance,
-              contexts: payload.contexts?.map(context => ({
-                id: nanoid(),
-                contextId: nanoid(),
-                lane: context.lane,
-                ideas: context.ideas,
-                hints: context.hints,
-                strategy: context.strategy,
-                text: context.text,
-                destinations: context.destinations,
-                metadata: context.metadata,
-              })),
-              destinations: payload.destinations,
-            } satisfies WebSocketEvents['spark:command']
-
-            sendSparkCommand(command)
-
-            return `spark:command sent (${command.commandId}) to ${command.destinations.join(', ')}`
-          },
-        }),
+        await createCallSparkCommandTool(sendSparkCommand),
       ]
     : undefined
 

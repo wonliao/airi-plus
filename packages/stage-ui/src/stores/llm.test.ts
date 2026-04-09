@@ -1,9 +1,10 @@
 import type { WebSocketBaseEvent, WebSocketEvents } from '@proj-airi/server-sdk'
+import type { JsonSchema } from 'xsschema'
 
 import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { isToolRelatedError, isTrustedOpenClawResultEvent, prepareSparkCommandForSend, shouldExposeOpenClawBridgeTool } from './llm'
+import { createCallSparkCommandTool, isToolRelatedError, isTrustedOpenClawResultEvent, prepareSparkCommandForSend, shouldExposeOpenClawBridgeTool } from './llm'
 
 describe('isToolRelatedError', () => {
   const positives: [provider: string, msg: string][] = [
@@ -105,6 +106,69 @@ describe('shouldExposeOpenClawBridgeTool', () => {
 
   it('keeps the bridge tool for non-OpenClaw providers', () => {
     expect(shouldExposeOpenClawBridgeTool('gpt-4o', { providerId: 'openai' })).toBe(true)
+  })
+})
+
+describe('createCallSparkCommandTool', () => {
+  it('sanitizes the tool schema for OpenAI strict mode', async () => {
+    const sparkTool = await createCallSparkCommandTool(() => {})
+    const schema = sparkTool.function.parameters as JsonSchema
+    const props = schema.properties!
+
+    expect(schema.required).toEqual(Object.keys(props))
+
+    const guidance = props.guidance as JsonSchema
+    const guidanceProps = guidance.properties!
+    expect((guidanceProps.personaJson as JsonSchema).type).toBe('string')
+
+    const contexts = props.contexts as JsonSchema
+    const contextItems = contexts.items as JsonSchema
+    const contextProps = contextItems.properties!
+    expect(contextItems.required).toEqual(Object.keys(contextProps))
+
+    expect((contextProps.destinationsJson as JsonSchema).type).toBe('string')
+    expect((contextProps.metadataJson as JsonSchema).type).toBe('string')
+  })
+
+  it('parses personaJson and metadataJson before sending spark commands', async () => {
+    const sent: WebSocketEvents['spark:command'][] = []
+    const sparkTool = await createCallSparkCommandTool(command => sent.push(command))
+
+    const result = await sparkTool.execute({
+      destinations: ['agent-1'],
+      guidance: {
+        type: 'instruction',
+        personaJson: JSON.stringify({ curiosity: 'high', confidence: 'low', invalid: 'oops' }),
+        options: [{
+          label: 'Primary option',
+          steps: ['Do the thing'],
+        }],
+      },
+      contexts: [{
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        text: 'Context payload',
+        destinationsJson: JSON.stringify({ include: ['character'], exclude: ['minecraft'], ignored: true }),
+        metadataJson: JSON.stringify({ priority: 'high', retries: 2, nested: { nope: true } }),
+      }],
+    }, undefined as never)
+
+    expect(result).toContain('spark:command sent')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.guidance).toMatchObject({
+      type: 'instruction',
+      persona: {
+        confidence: 'low',
+        curiosity: 'high',
+      },
+    })
+    expect(sent[0]?.contexts?.[0]?.metadata).toEqual({
+      priority: 'high',
+      retries: 2,
+    })
+    expect(sent[0]?.contexts?.[0]?.destinations).toEqual({
+      exclude: ['minecraft'],
+      include: ['character'],
+    })
   })
 })
 
