@@ -15,7 +15,9 @@ const openClawMetadataSchema = z.object({
 
 const openClawContextSchema = z.object({
   lane: z.string().optional().describe('Logical lane for extra context attached to the task.'),
-  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional().describe('JSON-like metadata for the extra context item.'),
+  // NOTICE: metadata travels as JSON text because z.record() emits `propertyNames`,
+  // which OpenAI rejects in tool schemas.
+  metadataJson: z.string().optional().describe('Optional JSON object string for the extra context metadata, e.g. {"priority":"high"}'),
   text: z.string().describe('Context text to include with the delegated task.'),
 }).strict()
 
@@ -55,6 +57,38 @@ export interface OpenClawToolResult {
   summary: string
 }
 
+type OpenClawContextMetadataValue = string | number | boolean | null
+type OpenClawContextMetadata = Record<string, OpenClawContextMetadataValue>
+
+function sanitizeSchemaForOpenAIStrictMode(schema: unknown): void {
+  if (!schema || typeof schema !== 'object') {
+    return
+  }
+
+  const candidate = schema as {
+    items?: unknown
+    properties?: Record<string, unknown>
+    propertyNames?: unknown
+    required?: string[]
+  }
+
+  if ('propertyNames' in candidate) {
+    delete candidate.propertyNames
+  }
+
+  if (candidate.properties) {
+    candidate.required = Object.keys(candidate.properties)
+
+    for (const nestedSchema of Object.values(candidate.properties)) {
+      sanitizeSchemaForOpenAIStrictMode(nestedSchema)
+    }
+  }
+
+  if (candidate.items) {
+    sanitizeSchemaForOpenAIStrictMode(candidate.items)
+  }
+}
+
 export function extractExplicitOpenClawTask(message: string): string | undefined {
   const trimmedMessage = message.trim()
 
@@ -80,6 +114,32 @@ function buildOpenClawMetadata(payload: OpenClawToolPayload) {
     source: payload.source ?? 'stage-ui:openclaw-tool',
     taskText: payload.task,
     userId: payload.userId,
+  }
+}
+
+function parseOpenClawContextMetadata(metadataJson?: string): OpenClawContextMetadata | undefined {
+  if (!metadataJson) {
+    return undefined
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson) as unknown
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return undefined
+    }
+
+    const entries = Object.entries(parsed).filter(([, value]) =>
+      value === null
+      || typeof value === 'string'
+      || typeof value === 'number'
+      || typeof value === 'boolean',
+    )
+
+    return entries.length > 0 ? Object.fromEntries(entries) : undefined
+  }
+  catch {
+    return undefined
   }
 }
 
@@ -111,7 +171,7 @@ export function buildOpenClawSparkCommand(payload: OpenClawToolPayload): WebSock
         lane: context.lane,
         strategy: ContextUpdateStrategy.AppendSelf,
         text: context.text,
-        metadata: context.metadata,
+        metadata: parseOpenClawContextMetadata(context.metadataJson),
       })),
     ],
     destinations: [payload.target ?? 'openclaw-bridge'],
@@ -147,13 +207,19 @@ export async function openclaw(
   sendSparkCommand: (command: WebSocketEvents['spark:command']) => void | Promise<void>,
   waitForOpenClawResult?: (commandId: string, payload: OpenClawToolPayload) => Promise<OpenClawToolResult>,
 ) {
+  const openClawTool = await tool({
+    name: 'delegate_openclaw_task',
+    description: 'Delegate a task to the AIRI OpenClaw bridge through spark:command using the existing server-channel path, then wait for the final OpenClaw result.',
+    parameters: openClawToolSchema,
+    execute: async payload => executeOpenClawTool(payload, sendSparkCommand, waitForOpenClawResult),
+  })
+
+  // NOTICE: OpenAI strict tool schemas reject `propertyNames` and expect every object
+  // property to appear in `required`, including nested array item objects.
+  sanitizeSchemaForOpenAIStrictMode(openClawTool.function.parameters)
+
   return [
-    await tool({
-      name: 'delegate_openclaw_task',
-      description: 'Delegate a task to the AIRI OpenClaw bridge through spark:command using the existing server-channel path, then wait for the final OpenClaw result.',
-      parameters: openClawToolSchema,
-      execute: async payload => executeOpenClawTool(payload, sendSparkCommand, waitForOpenClawResult),
-    }),
+    openClawTool,
   ]
 }
 

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { WIP } from '@proj-airi/stage-ui/components'
+import { LongTermMemorySettings } from '@proj-airi/stage-ui/components'
 </script>
 
 <template>
-  <WIP />
+  <LongTermMemorySettings />
 </template>
 
 <route lang="yaml">
@@ -11,6 +11,7 @@ meta:
   layout: settings
   titleKey: settings.pages.modules.memory-long-term.title
   subtitleKey: settings.title
+  descriptionKey: settings.pages.modules.memory-long-term.description
   stageTransition:
     name: slide
 </route>

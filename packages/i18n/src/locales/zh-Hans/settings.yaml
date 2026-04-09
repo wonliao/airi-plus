@@ -224,7 +224,34 @@ pages:
     upload_desc: 点击或拖拽文件到此处上传
   memory:
     description: 存放记忆的地方，以及策略
-    title: 记忆体
+    title: 记忆
+    overview:
+      title: 记忆后端
+      description: 分别配置短期与长期记忆，让 AIRI 能清楚区分近期上下文与稳定知识。
+      openSettings: 打开设置
+    status:
+      configured: 已配置
+      validated: 已验证
+      needsAttention: 需要关注
+      notConfigured: 尚未配置
+      enabled: 已启用
+      disabled: 已停用
+      enabledValue: 开启
+      disabledValue: 关闭
+      configuredValue: 就绪
+      incompleteValue: 未完成
+      validatedValue: 通过
+      failedValue: 失败
+      pendingValue: 待验证
+    validation:
+      idleTitle: 尚未执行验证
+      successTitle: 验证通过
+      errorTitle: 验证失败
+      runCheck: 执行检查
+      configuredPending: 配置已填写完成，但尚未执行验证。
+      notConfigured: 请先完成必要字段，验证才能通过。
+      configuredLabel: 已配置
+      notConfiguredLabel: 尚未配置
   data:
     title: Data
     description: 管理存储 AIRI 数据、导出和重置
@@ -410,11 +437,98 @@ pages:
             verbose-json-unsupported: >-
               Your provider did not return verbose_json segments. Confidence filtering had no effect on the last transcription.
     memory-long-term:
-      description: 长期记忆
+      description: 长期记忆专用设置与管理
       title: 长期记忆
+      sections:
+        configuration:
+          title: llm-wiki 配置
+          description: 配置 AIRI 用于整理与可提升记忆的长期知识工作区。
+      fields:
+        enabled:
+          label: 启用长期记忆
+          description: 允许 AIRI 使用 llm-wiki 维护整理过的长期知识工作区。
+        workspacePath:
+          label: 工作区路径
+          description: llm-wiki 工作区所在的根目录。
+          placeholder: /path/to/wiki-workspace
+        indexPath:
+          label: 索引路径
+          description: AIRI 应视为 wiki 索引入口的文件。
+          placeholder: index.md
+        overviewPath:
+          label: 概览路径
+          description: 作为主要摘要入口的概览页面。
+          placeholder: wiki/overview.md
+        queryMode:
+          label: 查询模式
+          description: 选择 AIRI 在首版集成时读取 llm-wiki 的方式。
+          placeholder: 选择查询模式
+        allowPromotion:
+          label: 允许提升
+          description: 允许未来的 runtime 集成把合格记忆提升为长期知识。
+        manualReviewRequired:
+          label: 需要人工审核
+          description: 非 trivial 的长期知识更新在接受前必须经过人工审核。
+        personaReviewRequired:
+          label: 需要人格审核
+          description: 与人格设定相关的变更必须经过明确审核。
+        notes:
+          label: 集成备注
+          description: 为未来 runtime 接线或工作区约定提供补充说明。
+          placeholder: 在此描述工作区约定、digest 指令或审核规则。
+      notes:
+        title: 首版范围
+        content: 此页面先定义 llm-wiki 的配置契约与验证状态；完整的 ingest、digest 与 promotion 自动化可以在后续再接入。
     memory-short-term:
-      description: 短期记忆
+      description: 短期记忆专用设置与管理
       title: 短期记忆
+      sections:
+        configuration:
+          title: mem0 配置
+          description: 配置 AIRI 用于近期事件、偏好与 recall 导向上下文的短期记忆后端。
+      fields:
+        enabled:
+          label: 启用短期记忆
+          description: 允许 AIRI 为 mem0 支持的 recall 与 capture 准备短期记忆设置。
+        mode:
+          label: 模式
+          description: 选择 AIRI 在首版集成时要对应的 mem0 部署模式。
+          placeholder: 选择模式
+        userId:
+          label: 用户 ID
+          description: mem0 应用来识别此记忆空间的稳定用户标识。
+          placeholder: ben
+        baseUrl:
+          label: 基础 URL
+          description: mem0 兼容服务或 adapter 入口的基础 URL。
+          placeholder: http://127.0.0.1:8000
+        apiKey:
+          label: API 密钥
+          description: 可选的平台凭证，只有在 mem0 使用 platform 模式时才需要。
+          placeholder: sk-...
+        embedder:
+          label: Embedder
+          description: 用于 recall 的 embedding 后端或配置标识。
+          placeholder: text-embedding-3-small
+        vectorStore:
+          label: Vector Store
+          description: mem0 用于持久化的向量数据库后端或存储目标。
+          placeholder: local-default
+        autoRecall:
+          label: 自动 recall
+          description: 允许未来的 runtime 集成自动拉取近期记忆上下文。
+        autoCapture:
+          label: 自动 capture
+          description: 允许未来的 runtime 集成自动写回新的记忆。
+        topK:
+          label: Top K
+          description: 单次查询最多取回的记忆项目数量。
+        searchThreshold:
+          label: 搜索阈值
+          description: 未来 mem0 检索流程使用的最低相似度阈值。
+      notes:
+        title: 首版范围
+        content: 此页面先建立 mem0 的配置契约与验证状态；完整的 recall 与 capture runtime 接线可在后续再加入。
     messaging-discord:
       description: Discord 发消息和语音聊天
       title: Discord

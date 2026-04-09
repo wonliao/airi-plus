@@ -21,6 +21,14 @@ describe('tools openclaw', () => {
     expect((props.task as JsonSchema).type).toBe('string')
     expect((props.conversationId as JsonSchema).type).toBe('string')
     expect((props.userId as JsonSchema).type).toBe('string')
+    expect(openclawTool?.function.parameters.required).toEqual(Object.keys(props))
+
+    const taskContexts = props.taskContexts as JsonSchema
+    const taskContextItems = taskContexts.items as JsonSchema
+    const taskContextProps = taskContextItems.properties!
+    expect((taskContextProps.metadataJson as JsonSchema).type).toBe('string')
+    expect(taskContextItems.required).toEqual(Object.keys(taskContextProps))
+    expect(taskContextItems.propertyNames).toBeUndefined()
   })
 
   it('builds a spark command that the OpenClaw bridge can recognize', () => {
@@ -33,7 +41,7 @@ describe('tools openclaw', () => {
       taskContexts: [
         {
           lane: 'notes',
-          metadata: { priority: 'high' },
+          metadataJson: JSON.stringify({ priority: 'high' }),
           text: 'Only include uncommitted changes.',
         },
       ],
@@ -146,5 +154,36 @@ describe('tools openclaw', () => {
     expect(extractExplicitOpenClawTask('請用 OpenClaw 執行這個任務：pwd')).toBe('pwd')
     expect(extractExplicitOpenClawTask('請交給 OpenClaw 處理：nvidia-smi')).toBe('nvidia-smi')
     expect(extractExplicitOpenClawTask('普通聊天訊息')).toBeUndefined()
+  })
+
+  it('drops invalid context metadata instead of emitting invalid schema-driven payloads', () => {
+    const command = buildOpenClawSparkCommand({
+      conversationId: 'conversation-5',
+      task: 'Summarize current task context.',
+      taskContexts: [
+        {
+          lane: 'notes',
+          metadataJson: '{"priority":{"nested":true}}',
+          text: 'Nested metadata should be ignored.',
+        },
+        {
+          lane: 'trace',
+          metadataJson: 'not-json',
+          text: 'Broken JSON should be ignored.',
+        },
+      ],
+      userId: 'user-5',
+    })
+
+    expect(command.contexts?.[1]).toMatchObject({
+      lane: 'notes',
+      metadata: undefined,
+      text: 'Nested metadata should be ignored.',
+    })
+    expect(command.contexts?.[2]).toMatchObject({
+      lane: 'trace',
+      metadata: undefined,
+      text: 'Broken JSON should be ignored.',
+    })
   })
 })

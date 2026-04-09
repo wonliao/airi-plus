@@ -311,9 +311,6 @@ overrides:
 packageExtensionsChecksum: sha256-lLxz4me6BFXSsuohDen54RU9DmiItse34Xa+IWGtSzU=
 
 patchedDependencies:
-  '@mediapipe/tasks-vision':
-    hash: 2014bd232d13f4bfac27f27d61105894bf54aca350379b2816fe05b6d3e27d66
-    path: patches/@mediapipe__tasks-vision.patch
   crossws@0.4.4:
     hash: 4d79ec736d10d2a81a9e2a31b067d43f0b6665122267981e652ab9923d165958
     path: patches/crossws@0.4.4.patch
@@ -326,7 +323,7 @@ patchedDependencies:
   pixi-live2d-display:
     hash: 122ac09349321d5bfe9d9817aa095cd1c9c4132af86345aa9e27ba8b63dadf2c
     path: patches/pixi-live2d-display.patch
-  srvx:
+  srvx@0.11.13:
     hash: c761d25a70e22a0925c88fe91a9dd1c3153dd341d8fd4f260166678156c4df2d
     path: patches/srvx.patch
 
@@ -2204,7 +2201,7 @@ importers:
     dependencies:
       '@mediapipe/tasks-vision':
         specifier: ^0.10.34
-        version: 0.10.34(patch_hash=2014bd232d13f4bfac27f27d61105894bf54aca350379b2816fe05b6d3e27d66)
+        version: 0.10.34
       '@moeru/std':
         specifier: 'catalog:'
         version: 0.1.0-beta.17
@@ -20085,7 +20082,7 @@ snapshots:
     optionalDependencies:
       markdown-it: 14.1.1
 
-  '@mediapipe/tasks-vision@0.10.34(patch_hash=2014bd232d13f4bfac27f27d61105894bf54aca350379b2816fe05b6d3e27d66)': {}
+  '@mediapipe/tasks-vision@0.10.34': {}
 
   '@modelcontextprotocol/sdk@1.27.1(@cfworker/json-schema@4.1.1)(zod@4.3.6)':
     dependencies:

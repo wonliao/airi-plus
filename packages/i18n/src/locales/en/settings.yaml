@@ -237,6 +237,33 @@ pages:
   memory:
     description: Where memories got stored, and organized
     title: Memory
+    overview:
+      title: Memory Backends
+      description: Configure short-term and long-term memory separately so AIRI can keep recent context and stable knowledge distinct.
+      openSettings: Open settings
+    status:
+      configured: Configured
+      validated: Validated
+      needsAttention: Needs attention
+      notConfigured: Not configured
+      enabled: Enabled
+      disabled: Disabled
+      enabledValue: On
+      disabledValue: Off
+      configuredValue: Ready
+      incompleteValue: Incomplete
+      validatedValue: Passed
+      failedValue: Failed
+      pendingValue: Pending
+    validation:
+      idleTitle: Validation not run yet
+      successTitle: Validation passed
+      errorTitle: Validation failed
+      runCheck: Run check
+      configuredPending: Configuration is complete, but validation has not been run yet.
+      notConfigured: Complete the required fields before validation can pass.
+      configuredLabel: Configured
+      notConfiguredLabel: Not configured
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets
@@ -442,9 +469,96 @@ pages:
     memory-long-term:
       description: Long-term memory specific settings and management
       title: Long-Term Memory
+      sections:
+        configuration:
+          title: llm-wiki configuration
+          description: Configure the long-term knowledge workspace AIRI should use for curated and promotable memory.
+      fields:
+        enabled:
+          label: Enable long-term memory
+          description: Allow AIRI to keep a curated long-term knowledge workspace backed by llm-wiki.
+        workspacePath:
+          label: Workspace path
+          description: Root folder that contains the llm-wiki workspace.
+          placeholder: /path/to/wiki-workspace
+        indexPath:
+          label: Index path
+          description: Entry file AIRI should treat as the wiki index.
+          placeholder: index.md
+        overviewPath:
+          label: Overview path
+          description: Overview page used as the primary summary entrypoint.
+          placeholder: wiki/overview.md
+        queryMode:
+          label: Query mode
+          description: Choose how AIRI should read from llm-wiki during first-release integration.
+          placeholder: Select a query mode
+        allowPromotion:
+          label: Allow promotion
+          description: Permit future runtime integrations to promote qualified memories into long-term knowledge.
+        manualReviewRequired:
+          label: Manual review required
+          description: Require manual review before non-trivial long-term knowledge updates are accepted.
+        personaReviewRequired:
+          label: Persona review required
+          description: Keep persona-related changes behind an explicit review gate.
+        notes:
+          label: Integration notes
+          description: Optional notes for future runtime wiring or workspace conventions.
+          placeholder: Describe any workspace conventions, digest commands, or review rules here.
+      notes:
+        title: First-release scope
+        content: This page defines the llm-wiki configuration contract and validation state first. Full ingest, digest, and promotion automation can be wired later.
     memory-short-term:
       description: Short-term memory specific settings and management
       title: Short-Term Memory
+      sections:
+        configuration:
+          title: mem0 configuration
+          description: Configure the short-term memory backend AIRI should use for recent events, preferences, and recall-oriented context.
+      fields:
+        enabled:
+          label: Enable short-term memory
+          description: Allow AIRI to prepare short-term memory settings for mem0-backed recall and capture.
+        mode:
+          label: Mode
+          description: Choose the mem0 deployment mode AIRI should target during first-release integration.
+          placeholder: Select a mode
+        userId:
+          label: User ID
+          description: Stable user identifier that mem0 should associate with this memory space.
+          placeholder: ben
+        baseUrl:
+          label: Base URL
+          description: Base URL of the mem0-compatible service or adapter entrypoint.
+          placeholder: http://127.0.0.1:8000
+        apiKey:
+          label: API key
+          description: Optional platform credential. Required only when mem0 is used in platform mode.
+          placeholder: sk-...
+        embedder:
+          label: Embedder
+          description: Embedding backend or configuration identifier used for recall.
+          placeholder: text-embedding-3-small
+        vectorStore:
+          label: Vector store
+          description: Vector store backend or storage target used for mem0 persistence.
+          placeholder: local-default
+        autoRecall:
+          label: Auto recall
+          description: Allow future runtime integrations to pull recent memory context automatically.
+        autoCapture:
+          label: Auto capture
+          description: Allow future runtime integrations to write new memories back automatically.
+        topK:
+          label: Top K
+          description: Maximum number of recalled memory items for a single lookup.
+        searchThreshold:
+          label: Search threshold
+          description: Minimum similarity threshold used by future mem0 retrieval flows.
+      notes:
+        title: First-release scope
+        content: This page establishes the mem0 settings contract and validation state first. Full recall and capture runtime wiring can be added afterwards.
     messaging-discord:
       description: Chat & voice chat over Discord
       title: Discord
