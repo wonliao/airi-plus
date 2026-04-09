@@ -2,7 +2,7 @@
 import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 
 import { errorMessageFrom } from '@moeru/std'
-import { ChatHistory } from '@proj-airi/stage-ui/components'
+import { ChatHistory, MemoryRuntimeDebug } from '@proj-airi/stage-ui/components'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useChatStreamStore } from '@proj-airi/stage-ui/stores/chat/stream-store'
@@ -248,6 +248,7 @@ async function handleDeleteMessage(index: number) {
         <div class="i-solar:trash-bin-2-bold-duotone" />
       </button>
     </div>
+    <MemoryRuntimeDebug :class="['mb-1']" />
     <BasicTextarea
       v-model="messageInput"
       :submit-on-enter="false"

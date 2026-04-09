@@ -497,11 +497,11 @@ pages:
         userId:
           label: 用户 ID
           description: mem0 应用来识别此记忆空间的稳定用户标识。
-          placeholder: ben
+          placeholder: 例如 ben
         baseUrl:
           label: 基础 URL
           description: mem0 兼容服务或 adapter 入口的基础 URL。
-          placeholder: http://127.0.0.1:8000
+          placeholder: 例如 http://127.0.0.1:8000
         apiKey:
           label: API 密钥
           description: 可选的平台凭证，只有在 mem0 使用 platform 模式时才需要。
@@ -529,6 +529,22 @@ pages:
       notes:
         title: 首版范围
         content: 此页面先建立 mem0 的配置契约与验证状态；完整的 recall 与 capture runtime 接线可在后续再加入。
+      captureTips:
+        title: 如何让 mem0 更容易记住
+        content: 打开自动 capture 后，尽量在聊天里用短句明确描述事实或偏好。相比很长或很模糊的段落，清楚陈述更容易被 mem0 提取成记忆。
+        example1: 例如：请记住，我最喜欢的水果是芒果。
+        example2: 例如：记住，我叫 Ben。
+        example3: 例如：记住，我偏好精确的设置步骤。
+      debug:
+        title: Runtime 调试
+        description: 用这个面板直接确认 AIRI 最近有没有把 capture 发给 mem0，以及 recall 实际查询了什么。
+        lastCapture: 最近一次 capture
+        lastRecall: 最近一次 recall
+        timestamp: 时间
+        resultCount: 数量
+        latestMemories: 最新记忆
+        emptyPayload: 没有 payload
+        emptyState: 目前还没有 runtime 调试记录。
     messaging-discord:
       description: Discord 发消息和语音聊天
       title: Discord

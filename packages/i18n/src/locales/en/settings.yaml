@@ -527,11 +527,11 @@ pages:
         userId:
           label: User ID
           description: Stable user identifier that mem0 should associate with this memory space.
-          placeholder: ben
+          placeholder: your-user-id
         baseUrl:
           label: Base URL
           description: Base URL of the mem0-compatible service or adapter entrypoint.
-          placeholder: http://127.0.0.1:8000
+          placeholder: e.g. http://127.0.0.1:8000
         apiKey:
           label: API key
           description: Optional platform credential. Required only when mem0 is used in platform mode.
@@ -559,6 +559,22 @@ pages:
       notes:
         title: First-release scope
         content: This page establishes the mem0 settings contract and validation state first. Full recall and capture runtime wiring can be added afterwards.
+      captureTips:
+        title: How to make mem0 remember
+        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. Clear statements are easier for mem0 to extract than long or vague paragraphs.
+        example1: 'Example: Please remember that my favorite fruit is mango.'
+        example2: 'Example: Remember that my name is Ben.'
+        example3: 'Example: Remember that I prefer precise setup guides.'
+      debug:
+        title: Runtime debug
+        description: Use this panel to confirm whether AIRI recently sent a capture request to mem0 and what query was used for recall.
+        lastCapture: Last capture
+        lastRecall: Last recall
+        timestamp: Time
+        resultCount: Count
+        latestMemories: Latest memories
+        emptyPayload: No payload
+        emptyState: No runtime debug entry yet.
     messaging-discord:
       description: Chat & voice chat over Discord
       title: Discord

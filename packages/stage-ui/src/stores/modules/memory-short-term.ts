@@ -9,8 +9,36 @@ import { computed } from 'vue'
 const mem0ConnectivityTimeoutMsec = 5_000
 
 interface Mem0ProbeCandidate {
-  kind: 'health' | 'models'
+  kind: 'health' | 'models' | 'openapi' | 'docs'
   url: URL
+}
+
+interface Mem0MessageInput {
+  role: 'assistant' | 'user'
+  content: string
+}
+
+interface Mem0SearchResult {
+  created_at?: string
+  id?: string
+  memory?: string
+  score?: number
+  user_id?: string
+}
+
+interface Mem0RuntimeDebugEntry {
+  at: string
+  latestMemories?: string[]
+  message: string
+  payload: string
+  resultCount?: number
+  status: 'error' | 'skipped' | 'success'
+}
+
+interface Mem0CaptureResult {
+  event?: string
+  id?: string
+  memory?: string
 }
 
 function toDirectoryUrl(baseUrl: URL) {
@@ -22,6 +50,8 @@ function resolveMem0ProbeCandidates(baseUrl: URL) {
   const candidates: Mem0ProbeCandidate[] = [
     { kind: 'health', url: new URL('health', directoryUrl) },
     { kind: 'health', url: new URL('healthz', directoryUrl) },
+    { kind: 'openapi', url: new URL('openapi.json', directoryUrl) },
+    { kind: 'docs', url: new URL('docs', directoryUrl) },
   ]
 
   if (baseUrl.pathname.endsWith('/v1') || baseUrl.pathname.endsWith('/v1/')) {
@@ -80,6 +110,66 @@ async function pingMem0Endpoint(baseUrl: URL, apiKey: string) {
   }
 }
 
+function createMem0Headers(apiKey: string, options?: { contentType?: string }) {
+  const headers: Record<string, string> = {
+    Accept: 'application/json',
+  }
+
+  if (options?.contentType) {
+    headers['Content-Type'] = options.contentType
+  }
+
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`
+    headers['X-API-Key'] = apiKey
+  }
+
+  return headers
+}
+
+function parseMem0ResultsPayload(payload: unknown): Mem0SearchResult[] {
+  if (Array.isArray(payload)) {
+    return payload.filter(entry => !!entry && typeof entry === 'object') as Mem0SearchResult[]
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return []
+  }
+
+  const record = payload as { results?: unknown }
+  return Array.isArray(record.results)
+    ? record.results.filter(entry => !!entry && typeof entry === 'object') as Mem0SearchResult[]
+    : []
+}
+
+function parseMem0CapturePayload(payload: unknown): Mem0CaptureResult[] {
+  if (!payload || typeof payload !== 'object') {
+    return []
+  }
+
+  const record = payload as { results?: unknown }
+  return Array.isArray(record.results)
+    ? record.results.filter(entry => !!entry && typeof entry === 'object') as Mem0CaptureResult[]
+    : []
+}
+
+function buildMem0RecallPrompt(results: Mem0SearchResult[]) {
+  if (results.length === 0) {
+    return ''
+  }
+
+  return [
+    'These are short-term memories recalled from mem0.',
+    'When the user asks about personal preferences, facts, or recent details that match these memories, answer from them directly unless the user is explicitly correcting them.',
+    ...results.map((result, index) => {
+      const scoreText = typeof result.score === 'number'
+        ? ` (score=${result.score.toFixed(3)})`
+        : ''
+      return `${index + 1}. ${result.memory ?? ''}${scoreText}`
+    }),
+  ].join('\n')
+}
+
 export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', false)
   const backendId = useLocalStorageManualReset<string>('settings/memory/short-term/backend-id', 'mem0')
@@ -96,6 +186,8 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const autoCapture = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-capture', false)
   const topK = useLocalStorageManualReset<number>('settings/memory/short-term/top-k', 5)
   const searchThreshold = useLocalStorageManualReset<number>('settings/memory/short-term/search-threshold', 0.6)
+  const lastCaptureDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-capture', null)
+  const lastRecallDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-recall', null)
 
   const configured = computed(() => {
     if (!enabled.value) {
@@ -113,9 +205,45 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     return true
   })
 
+  const runtimeReady = computed(() => enabled.value && configured.value && validationStatus.value === 'success')
+
   function resetValidationState() {
     validationStatus.reset()
     lastValidation.reset()
+  }
+
+  function setCaptureDebug(entry: Mem0RuntimeDebugEntry) {
+    lastCaptureDebug.value = entry
+  }
+
+  function setRecallDebug(entry: Mem0RuntimeDebugEntry) {
+    lastRecallDebug.value = entry
+  }
+
+  async function fetchLatestMemories() {
+    if (!runtimeReady.value) {
+      return []
+    }
+
+    try {
+      const response = await fetch(new URL(`memories?user_id=${encodeURIComponent(userId.value.trim())}`, toDirectoryUrl(new URL(baseUrl.value.trim()))), {
+        method: 'GET',
+        headers: createMem0Headers(apiKey.value.trim()),
+      })
+
+      if (!response.ok) {
+        return []
+      }
+
+      const payload = await response.json()
+      return parseMem0ResultsPayload(payload)
+        .map(result => result.memory?.trim() ?? '')
+        .filter(Boolean)
+        .slice(0, 8)
+    }
+    catch {
+      return []
+    }
   }
 
   async function validateConfiguration() {
@@ -199,6 +327,183 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     return { valid: true, message: lastValidation.value }
   }
 
+  async function searchMemories(query: string) {
+    if (!runtimeReady.value) {
+      setRecallDebug({
+        at: new Date().toISOString(),
+        message: 'Recall skipped because short-term memory is not runtime-ready.',
+        payload: query.trim(),
+        status: 'skipped',
+      })
+      return []
+    }
+
+    const trimmedQuery = query.trim()
+    if (!trimmedQuery) {
+      setRecallDebug({
+        at: new Date().toISOString(),
+        message: 'Recall skipped because the query was empty.',
+        payload: '',
+        status: 'skipped',
+      })
+      return []
+    }
+
+    try {
+      const response = await fetch(new URL('search', toDirectoryUrl(new URL(baseUrl.value.trim()))), {
+        method: 'POST',
+        headers: createMem0Headers(apiKey.value.trim(), { contentType: 'application/json' }),
+        body: JSON.stringify({
+          query: trimmedQuery,
+          user_id: userId.value.trim(),
+        }),
+      })
+
+      if (!response.ok) {
+        console.warn(`[mem0] search failed with HTTP ${response.status}`)
+        setRecallDebug({
+          at: new Date().toISOString(),
+          message: `Recall failed with HTTP ${response.status}.`,
+          payload: trimmedQuery,
+          status: 'error',
+        })
+        return []
+      }
+
+      const payload = await response.json()
+      const results = parseMem0ResultsPayload(payload).slice(0, topK.value)
+      const thresholdedResults = results.filter((result) => {
+        if (typeof result.score !== 'number') {
+          return true
+        }
+
+        return result.score >= searchThreshold.value
+      })
+
+      // NOTICE: Natural-language recall questions can score just below the UI threshold
+      // even when mem0's best hit is still clearly relevant. Falling back to the best
+      // available hit avoids "I don't know" responses when memory exists but ranking is noisy.
+      const finalResults = thresholdedResults.length > 0 ? thresholdedResults : results.slice(0, 1)
+      setRecallDebug({
+        at: new Date().toISOString(),
+        latestMemories: results.map(result => result.memory?.trim() ?? '').filter(Boolean).slice(0, 8),
+        message: finalResults.length > 0
+          ? `Recall returned ${finalResults.length} memory item(s).`
+          : 'Recall completed but mem0 returned no matching memory.',
+        payload: trimmedQuery,
+        resultCount: finalResults.length,
+        status: 'success',
+      })
+      return finalResults
+    }
+    catch (error) {
+      console.warn('[mem0] search request failed', errorMessageFrom(error) ?? error)
+      setRecallDebug({
+        at: new Date().toISOString(),
+        message: `Recall request failed: ${errorMessageFrom(error) ?? 'Unknown error.'}`,
+        payload: trimmedQuery,
+        status: 'error',
+      })
+      return []
+    }
+  }
+
+  async function captureMessages(messages: Mem0MessageInput[]) {
+    if (!runtimeReady.value || !autoCapture.value) {
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        message: !runtimeReady.value
+          ? 'Capture skipped because short-term memory is not runtime-ready.'
+          : 'Capture skipped because auto capture is disabled.',
+        payload: messages.map(message => `[${message.role}] ${message.content.trim()}`).filter(Boolean).join('\n'),
+        status: 'skipped',
+      })
+      return false
+    }
+
+    const usableMessages = messages
+      .map(message => ({
+        role: message.role,
+        content: message.content.trim(),
+      }))
+      .filter(message => !!message.content)
+
+    if (usableMessages.length === 0) {
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        message: 'Capture skipped because there was no usable message content.',
+        payload: '',
+        status: 'skipped',
+      })
+      return false
+    }
+
+    try {
+      const response = await fetch(new URL('memories', toDirectoryUrl(new URL(baseUrl.value.trim()))), {
+        method: 'POST',
+        headers: createMem0Headers(apiKey.value.trim(), { contentType: 'application/json' }),
+        body: JSON.stringify({
+          messages: usableMessages,
+          user_id: userId.value.trim(),
+        }),
+      })
+
+      if (!response.ok) {
+        console.warn(`[mem0] capture failed with HTTP ${response.status}`)
+        setCaptureDebug({
+          at: new Date().toISOString(),
+          message: `Capture failed with HTTP ${response.status}.`,
+          payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          status: 'error',
+        })
+        return false
+      }
+
+      const payload = await response.json()
+      const results = parseMem0CapturePayload(payload)
+      const latestMemories = await fetchLatestMemories()
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        latestMemories,
+        message: results.length > 0
+          ? `Capture sent ${usableMessages.length} message(s) to mem0 and mem0 returned ${results.length} result item(s).`
+          : `Capture sent ${usableMessages.length} message(s) to mem0.`,
+        payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+        resultCount: results.length || usableMessages.length,
+        status: 'success',
+      })
+      return true
+    }
+    catch (error) {
+      console.warn('[mem0] capture request failed', errorMessageFrom(error) ?? error)
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        message: `Capture request failed: ${errorMessageFrom(error) ?? 'Unknown error.'}`,
+        payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+        status: 'error',
+      })
+      return false
+    }
+  }
+
+  async function buildRecallPrompt(query: string) {
+    if (!runtimeReady.value || !autoRecall.value) {
+      return null
+    }
+
+    const results = await searchMemories(query)
+    const prompt = buildMem0RecallPrompt(results)
+
+    if (!prompt) {
+      return null
+    }
+
+    return {
+      prompt,
+      results,
+    }
+  }
+
   function resetState() {
     enabled.reset()
     backendId.reset()
@@ -212,6 +517,8 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     autoCapture.reset()
     topK.reset()
     searchThreshold.reset()
+    lastCaptureDebug.reset()
+    lastRecallDebug.reset()
     resetValidationState()
   }
 
@@ -219,6 +526,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     enabled,
     backendId,
     configured,
+    runtimeReady,
     validationStatus,
     lastValidation,
     mode,
@@ -231,6 +539,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     autoCapture,
     topK,
     searchThreshold,
+    lastCaptureDebug,
+    lastRecallDebug,
+    buildRecallPrompt,
+    captureMessages,
+    searchMemories,
     validateConfiguration,
     resetValidationState,
     resetState,

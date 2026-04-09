@@ -25,6 +25,7 @@ import { useChatStreamStore } from './chat/stream-store'
 import { useContextObservabilityStore } from './devtools/context-observability'
 import { useLLM } from './llm'
 import { useConsciousnessStore } from './modules/consciousness'
+import { useShortTermMemoryStore } from './modules/memory-short-term'
 import { useProvidersStore } from './providers'
 
 interface SendOptions {
@@ -78,6 +79,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const contextObservability = useContextObservabilityStore()
   const { activeSessionId } = storeToRefs(chatSession)
   const { streamingMessage } = storeToRefs(chatStream)
+  const shortTermMemoryStore = useShortTermMemoryStore()
 
   const sending = ref(false)
   const pendingQueuedSends = ref<QueuedSend[]>([])
@@ -242,6 +244,10 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           outputText: resultText,
           toolCalls: [],
         }, streamingMessageContext)
+        await shortTermMemoryStore.captureMessages([
+          { role: 'user', content: sendingMessage },
+          { role: 'assistant', content: resultText },
+        ])
 
         if (isForegroundSession()) {
           streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
@@ -335,6 +341,21 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return rawMessage
       })
 
+      const mem0Recall = await shortTermMemoryStore.buildRecallPrompt(sendingMessage)
+      if (mem0Recall) {
+        const system = newMessages.slice(0, 1)
+        const afterSystem = newMessages.slice(1, newMessages.length)
+
+        newMessages = [
+          ...system,
+          {
+            role: 'user',
+            content: mem0Recall.prompt,
+          },
+          ...afterSystem,
+        ]
+      }
+
       const contextsSnapshot = chatContext.getContextsSnapshot()
       const contextPromptMessage = buildContextPromptMessage(contextsSnapshot)
       if (contextPromptMessage) {
@@ -353,6 +374,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           sessionId,
           details: {
             contexts: contextsSnapshot,
+            mem0Recall,
             promptMessage: contextPromptMessage,
           },
         })
@@ -363,9 +385,24 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         sessionId,
         message: sendingMessage,
         contexts: contextsSnapshot,
-        promptMessage: contextPromptMessage,
+        promptMessage: mem0Recall
+          ? {
+              role: 'user',
+              content: mem0Recall.prompt,
+            }
+          : contextPromptMessage,
         composedMessage: newMessages as Message[],
       })
+      if (mem0Recall) {
+        contextObservability.recordLifecycle({
+          phase: 'prompt-context-built',
+          channel: 'chat',
+          sessionId,
+          details: {
+            mem0Recall,
+          },
+        })
+      }
       contextObservability.recordLifecycle({
         phase: 'after-compose',
         channel: 'chat',
@@ -373,6 +410,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         textPreview: sendingMessage,
         details: {
           composedMessage: newMessages,
+          mem0Recall,
         },
       })
 
@@ -454,6 +492,10 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         outputText: fullText,
         toolCalls: sessionMessagesForSend.filter(msg => msg.role === 'tool') as ToolMessage[],
       }, streamingMessageContext)
+      await shortTermMemoryStore.captureMessages([
+        { role: 'user', content: sendingMessage },
+        { role: 'assistant', content: fullText },
+      ])
 
       if (isForegroundSession()) {
         streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }

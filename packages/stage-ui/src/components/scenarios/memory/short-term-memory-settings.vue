@@ -23,6 +23,8 @@ const {
   autoCapture,
   topK,
   searchThreshold,
+  lastCaptureDebug,
+  lastRecallDebug,
 } = storeToRefs(store)
 
 const modeOptions = [
@@ -166,6 +168,65 @@ const modeOptions = [
           <p :class="['mt-2 text-neutral-600 dark:text-neutral-400']">
             {{ $t('settings.pages.modules.memory-short-term.notes.content') }}
           </p>
+        </div>
+
+        <div :class="['rounded-2xl border p-5 text-sm', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
+          <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+            {{ $t('settings.pages.modules.memory-short-term.captureTips.title') }}
+          </div>
+          <p :class="['mt-2 text-neutral-600 dark:text-neutral-400']">
+            {{ $t('settings.pages.modules.memory-short-term.captureTips.content') }}
+          </p>
+          <div :class="['mt-3 flex flex-col gap-2 text-neutral-600 dark:text-neutral-400']">
+            <div>{{ $t('settings.pages.modules.memory-short-term.captureTips.example1') }}</div>
+            <div>{{ $t('settings.pages.modules.memory-short-term.captureTips.example2') }}</div>
+            <div>{{ $t('settings.pages.modules.memory-short-term.captureTips.example3') }}</div>
+          </div>
+        </div>
+
+        <div :class="['rounded-2xl border p-5 text-sm', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
+          <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+            {{ $t('settings.pages.modules.memory-short-term.debug.title') }}
+          </div>
+          <p :class="['mt-2 text-neutral-600 dark:text-neutral-400']">
+            {{ $t('settings.pages.modules.memory-short-term.debug.description') }}
+          </p>
+
+          <div :class="['mt-4 flex flex-col gap-4']">
+            <div :class="['rounded-xl border p-4', 'border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950/40']">
+              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.debug.lastCapture') }}
+              </div>
+              <div v-if="lastCaptureDebug" :class="['mt-3 flex flex-col gap-2 text-xs text-neutral-600 dark:text-neutral-400']">
+                <div>{{ lastCaptureDebug.message }}</div>
+                <div>{{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}: {{ lastCaptureDebug.at }}</div>
+                <div v-if="typeof lastCaptureDebug.resultCount === 'number'">
+                  {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}: {{ lastCaptureDebug.resultCount }}
+                </div>
+                <pre :class="['overflow-x-auto rounded-lg bg-neutral-100 p-3 whitespace-pre-wrap break-words dark:bg-neutral-900']">{{ lastCaptureDebug.payload || $t('settings.pages.modules.memory-short-term.debug.emptyPayload') }}</pre>
+              </div>
+              <div v-else :class="['mt-3 text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.debug.emptyState') }}
+              </div>
+            </div>
+
+            <div :class="['rounded-xl border p-4', 'border-neutral-200 bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-950/40']">
+              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.debug.lastRecall') }}
+              </div>
+              <div v-if="lastRecallDebug" :class="['mt-3 flex flex-col gap-2 text-xs text-neutral-600 dark:text-neutral-400']">
+                <div>{{ lastRecallDebug.message }}</div>
+                <div>{{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}: {{ lastRecallDebug.at }}</div>
+                <div v-if="typeof lastRecallDebug.resultCount === 'number'">
+                  {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}: {{ lastRecallDebug.resultCount }}
+                </div>
+                <pre :class="['overflow-x-auto rounded-lg bg-neutral-100 p-3 whitespace-pre-wrap break-words dark:bg-neutral-900']">{{ lastRecallDebug.payload || $t('settings.pages.modules.memory-short-term.debug.emptyPayload') }}</pre>
+              </div>
+              <div v-else :class="['mt-3 text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.debug.emptyState') }}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
