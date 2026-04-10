@@ -479,8 +479,8 @@ pages:
           description: Allow AIRI to keep a curated long-term knowledge workspace backed by llm-wiki.
         workspacePath:
           label: Workspace path
-          description: Root folder that contains the llm-wiki workspace. In AIRI Electron you can also enter llm-wiki to use the app-managed workspace under app data.
-          placeholder: llm-wiki or /path/to/wiki-workspace
+          description: Root folder that contains the llm-wiki workspace. In AIRI Electron you can enter llm-wiki, a path relative to app data, or an absolute path.
+          placeholder: llm-wiki, ./knowledge/wiki, or /path/to/wiki-workspace
         indexPath:
           label: Index path
           description: Entry file AIRI should treat as the wiki index.

@@ -15,7 +15,14 @@ import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, s
 
 import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
-import { electronEnsureDefaultLlmWikiWorkspace, electronQueryLlmWiki, electronValidateLlmWikiWorkspace } from '@proj-airi/stage-shared'
+import {
+  electronEnsureDefaultLlmWikiWorkspace,
+  electronQueryLlmWiki,
+  electronValidateLlmWikiWorkspace,
+  isAbsoluteFilesystemPath,
+  isElectronManagedMemoryAlias,
+  isElectronManagedRelativePath,
+} from '@proj-airi/stage-shared'
 import { app } from 'electron'
 
 function ensureTrailingSeparator(value: string) {
@@ -34,10 +41,6 @@ function resolveWorkspaceFilePath(workspacePath: string, filePath: string) {
   return normalize(isAbsolute(filePath) ? resolve(filePath) : resolve(workspacePath, filePath))
 }
 
-function isDefaultWorkspaceAlias(value: string) {
-  return value.trim().toLowerCase() === 'llm-wiki'
-}
-
 function getDefaultWorkspacePath() {
   return joinUserDataPath('llm-wiki')
 }
@@ -48,6 +51,33 @@ function getSeedWorkspacePath() {
 
 function joinUserDataPath(...paths: string[]) {
   return resolve(app.getPath('userData'), ...paths)
+}
+
+function resolveAppDataPath(inputPath: string) {
+  if (typeof app?.getPath === 'function') {
+    return app.getPath('userData')
+  }
+
+  const trimmed = inputPath.trim()
+  if (isAbsoluteFilesystemPath(trimmed)) {
+    return dirname(resolve(trimmed))
+  }
+
+  return resolve(process.cwd())
+}
+
+function resolveManagedWorkspacePathInput(inputPath: string, defaultWorkspacePath: string, appDataPath: string) {
+  const trimmed = inputPath.trim()
+
+  if (isElectronManagedMemoryAlias(trimmed, 'llm-wiki')) {
+    return normalize(resolve(defaultWorkspacePath))
+  }
+
+  if (isElectronManagedRelativePath(trimmed) && !isAbsoluteFilesystemPath(trimmed)) {
+    return normalize(resolve(appDataPath, trimmed))
+  }
+
+  return normalize(resolve(trimmed))
 }
 
 async function assertReadableDirectory(path: string, label: string) {
@@ -418,7 +448,8 @@ async function validateWorkspace(payload: LlmWikiWorkspaceValidationPayload): Pr
     workspacePath: payload.workspacePath,
     indexPath: payload.indexPath,
     overviewPath: payload.overviewPath,
-    defaultWorkspacePath: isDefaultWorkspaceAlias(payload.workspacePath)
+    appDataPath: resolveAppDataPath(payload.workspacePath),
+    defaultWorkspacePath: isElectronManagedMemoryAlias(payload.workspacePath, 'llm-wiki')
       ? (await ensureDefaultWorkspace()).workspacePath
       : payload.workspacePath,
   })
@@ -428,11 +459,14 @@ async function validateWorkspaceFromPaths(params: {
   workspacePath: string
   indexPath: string
   overviewPath: string
+  appDataPath: string
   defaultWorkspacePath: string
 }): Promise<LlmWikiWorkspaceValidationResult> {
-  const resolvedWorkspacePath = isDefaultWorkspaceAlias(params.workspacePath)
-    ? normalize(resolve(params.defaultWorkspacePath))
-    : normalize(resolve(params.workspacePath))
+  const resolvedWorkspacePath = resolveManagedWorkspacePathInput(
+    params.workspacePath,
+    params.defaultWorkspacePath,
+    params.appDataPath,
+  )
   const resolvedIndexPath = resolveWorkspaceFilePath(resolvedWorkspacePath, params.indexPath)
   const resolvedOverviewPath = resolveWorkspaceFilePath(resolvedWorkspacePath, params.overviewPath)
 

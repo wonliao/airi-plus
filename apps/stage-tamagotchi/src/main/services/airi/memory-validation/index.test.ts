@@ -1,6 +1,6 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
@@ -117,6 +117,7 @@ describe('llm-wiki workspace alias', () => {
         workspacePath: 'llm-wiki',
         indexPath: 'index.md',
         overviewPath: 'wiki/overview.md',
+        appDataPath: appDataRootFromWorkspace(managedWorkspacePath),
         defaultWorkspacePath: managedWorkspacePath,
       })
 
@@ -128,4 +129,36 @@ describe('llm-wiki workspace alias', () => {
       await rm(managedWorkspacePath, { force: true, recursive: true })
     }
   })
+
+  it('resolves relative workspace paths against AIRI app data', async () => {
+    const seedWorkspacePath = await createWikiFixture()
+    const appDataRoot = join(tmpdir(), `airi-app-data-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const managedWorkspacePath = join(appDataRoot, 'knowledge', 'frieren')
+
+    try {
+      await __memoryValidationTestUtils.ensureDefaultWorkspaceFromPaths({
+        workspacePath: managedWorkspacePath,
+        seedWorkspacePath,
+      })
+
+      const relativeValidation = await __memoryValidationTestUtils.validateWorkspaceFromPaths({
+        workspacePath: './knowledge/frieren',
+        indexPath: 'index.md',
+        overviewPath: 'wiki/overview.md',
+        appDataPath: appDataRoot,
+        defaultWorkspacePath: appDataRoot,
+      })
+
+      expect(relativeValidation.valid).toBe(true)
+      expect(relativeValidation.resolvedWorkspacePath).toBe(managedWorkspacePath)
+    }
+    finally {
+      await rm(seedWorkspacePath, { force: true, recursive: true })
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
 })
+
+function appDataRootFromWorkspace(workspacePath: string) {
+  return dirname(dirname(workspacePath))
+}

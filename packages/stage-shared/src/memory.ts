@@ -6,6 +6,31 @@ function getRendererWindow() {
   return (globalThis as { window?: unknown }).window
 }
 
+export type ElectronManagedMemoryPathKind = 'llm-wiki' | 'mem0'
+
+export function isAbsoluteFilesystemPath(value: string) {
+  return value.startsWith('/') || /^[A-Z]:[\\/]/i.test(value)
+}
+
+export function isElectronManagedMemoryAlias(value: string, kind: ElectronManagedMemoryPathKind) {
+  return value.trim().toLowerCase() === kind
+}
+
+export function isElectronManagedRelativePath(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return false
+  }
+
+  if (isAbsoluteFilesystemPath(trimmed)) {
+    return false
+  }
+
+  return trimmed.startsWith('./')
+    || trimmed.startsWith('../')
+    || (!trimmed.startsWith('/') && !/^[A-Z]:[\\/]/i.test(trimmed))
+}
+
 export interface LlmWikiWorkspaceValidationPayload {
   workspacePath: string
   indexPath: string

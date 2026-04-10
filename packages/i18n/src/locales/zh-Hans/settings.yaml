@@ -449,8 +449,8 @@ pages:
           description: 允许 AIRI 使用 llm-wiki 维护整理过的长期知识工作区。
         workspacePath:
           label: 工作区路径
-          description: llm-wiki 工作区所在的根目录。在 AIRI Electron 里也可以直接填 llm-wiki，系统会自动解析到 app data 内建工作区。
-          placeholder: llm-wiki 或 /path/to/wiki-workspace
+          description: llm-wiki 工作区所在的根目录。在 AIRI Electron 里可以填 llm-wiki、相对于 app data 的路径，或绝对路径。
+          placeholder: llm-wiki、./knowledge/wiki 或 /path/to/wiki-workspace
         indexPath:
           label: 索引路径
           description: AIRI 应视为 wiki 索引入口的文件。

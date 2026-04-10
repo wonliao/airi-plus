@@ -1,19 +1,19 @@
 import type { MemoryValidationStatus } from './memory-shared'
 
 import { errorMessageFrom } from '@moeru/std'
-import { ensureDefaultLlmWikiWorkspaceOnDesktop, isStageTamagotchi, queryLlmWikiOnDesktop, validateLlmWikiWorkspaceOnDesktop } from '@proj-airi/stage-shared'
+import {
+  ensureDefaultLlmWikiWorkspaceOnDesktop,
+  isAbsoluteFilesystemPath,
+  isElectronManagedMemoryAlias,
+  isElectronManagedRelativePath,
+  isStageTamagotchi,
+  queryLlmWikiOnDesktop,
+  validateLlmWikiWorkspaceOnDesktop,
+} from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
-
-function isAbsolutePath(value: string) {
-  return value.startsWith('/') || /^[A-Z]:[\\/]/i.test(value)
-}
-
-function isDesktopWorkspaceAlias(value: string) {
-  return value.trim().toLowerCase() === 'llm-wiki'
-}
 
 const defaultLongTermMemorySettings = {
   allowPromotion: false,
@@ -125,7 +125,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
       return
     }
 
-    if (workspacePath.value.trim()) {
+    if (workspacePath.value.trim() && !isElectronManagedMemoryAlias(workspacePath.value.trim(), 'llm-wiki')) {
       return
     }
 
@@ -165,9 +165,18 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
       return { valid: false, message: lastValidation.value }
     }
 
-    if (!isAbsolutePath(workspacePath.value.trim()) && (!isStageTamagotchi() || !isDesktopWorkspaceAlias(workspacePath.value.trim()))) {
+    if (
+      !isAbsoluteFilesystemPath(workspacePath.value.trim())
+      && (
+        !isStageTamagotchi()
+        || (
+          !isElectronManagedMemoryAlias(workspacePath.value.trim(), 'llm-wiki')
+          && !isElectronManagedRelativePath(workspacePath.value.trim())
+        )
+      )
+    ) {
       validationStatus.value = 'error'
-      lastValidation.value = 'Workspace path should be an absolute path so runtime integrations can resolve it reliably.'
+      lastValidation.value = 'Workspace path should be an absolute path, `llm-wiki`, or a path relative to AIRI app data.'
       return { valid: false, message: lastValidation.value }
     }
 
@@ -189,13 +198,13 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
       return { valid: false, message: lastValidation.value }
     }
 
-    if (isAbsolutePath(indexPath.value.trim()) && !indexPath.value.trim().startsWith(workspacePath.value.trim())) {
+    if (isAbsoluteFilesystemPath(indexPath.value.trim()) && !indexPath.value.trim().startsWith(workspacePath.value.trim())) {
       validationStatus.value = 'error'
       lastValidation.value = 'Absolute index path must live inside the configured workspace path.'
       return { valid: false, message: lastValidation.value }
     }
 
-    if (isAbsolutePath(overviewPath.value.trim()) && !overviewPath.value.trim().startsWith(workspacePath.value.trim())) {
+    if (isAbsoluteFilesystemPath(overviewPath.value.trim()) && !overviewPath.value.trim().startsWith(workspacePath.value.trim())) {
       validationStatus.value = 'error'
       lastValidation.value = 'Absolute overview path must live inside the configured workspace path.'
       return { valid: false, message: lastValidation.value }
