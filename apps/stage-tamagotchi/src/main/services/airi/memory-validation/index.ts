@@ -138,6 +138,12 @@ interface StoredShortTermMemoryState {
   memories: StoredShortTermMemory[]
 }
 
+interface ParsedShortTermMemoryIdentity {
+  category: string
+  conflictKey: string
+  normalizedMemory: string
+}
+
 const shortTermMemoryStateVersion = 1
 const actTokenPattern = /<\|ACT:[\s\S]*?\|>/g
 const whitespacePattern = /\s+/g
@@ -404,6 +410,51 @@ function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
   }
 
   return Array.from(candidates, candidate => cleanMemoryText(candidate)).filter(Boolean)
+}
+
+function parseShortTermMemoryIdentity(memory: string): ParsedShortTermMemoryIdentity {
+  const cleaned = cleanMemoryText(memory)
+  const normalizedMemory = normalizeForSearch(cleaned)
+
+  if (cleaned.startsWith('名字是') || /^name is /iu.test(cleaned)) {
+    return {
+      category: 'identity.name',
+      conflictKey: 'identity.name',
+      normalizedMemory,
+    }
+  }
+
+  if (cleaned.startsWith('住在') || /^lives in /iu.test(cleaned)) {
+    return {
+      category: 'profile.location',
+      conflictKey: 'profile.location',
+      normalizedMemory,
+    }
+  }
+
+  const favoriteZh = cleaned.match(/^最喜歡的(.+?)是(.+)$/u)
+  if (favoriteZh) {
+    return {
+      category: 'preference.favorite',
+      conflictKey: `preference.favorite:${normalizeForSearch(favoriteZh[1])}`,
+      normalizedMemory,
+    }
+  }
+
+  const favoriteEn = cleaned.match(/^favorite (.+?) is (.+)$/iu)
+  if (favoriteEn) {
+    return {
+      category: 'preference.favorite',
+      conflictKey: `preference.favorite:${normalizeForSearch(favoriteEn[1])}`,
+      normalizedMemory,
+    }
+  }
+
+  return {
+    category: 'memory.generic',
+    conflictKey: normalizedMemory,
+    normalizedMemory,
+  }
 }
 
 function scoreShortTermMemory(memory: StoredShortTermMemory, query: string) {
@@ -1130,18 +1181,42 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
   const now = new Date().toISOString()
 
   for (const candidate of candidates) {
-    const normalizedCandidate = normalizeForSearch(candidate)
-    const existing = state.memories.find(memory =>
-      memory.userId === payload.userId.trim() && normalizeForSearch(memory.memory) === normalizedCandidate)
+    const identity = parseShortTermMemoryIdentity(candidate)
+    const existing = state.memories.find((memory) => {
+      if (memory.userId !== payload.userId.trim()) {
+        return false
+      }
+
+      const existingIdentity = parseShortTermMemoryIdentity(memory.memory)
+      return existingIdentity.conflictKey === identity.conflictKey
+    })
 
     if (existing) {
+      const existingIdentity = parseShortTermMemoryIdentity(existing.memory)
+
+      if (existingIdentity.normalizedMemory === identity.normalizedMemory) {
+        existing.updatedAt = now
+        existing.sourceText = candidate
+        existing.keywords = extractSearchTokens(candidate)
+        results.push({
+          event: 'update',
+          id: existing.id,
+          memory: existing.memory,
+          previousMemory: existing.memory,
+        })
+        continue
+      }
+
+      const previousMemory = existing.memory
+      existing.memory = candidate
       existing.updatedAt = now
       existing.sourceText = candidate
-      existing.keywords = extractSearchTokens(candidate)
+      existing.keywords = extractSearchTokens(`${candidate} ${candidate}`)
       results.push({
         event: 'update',
         id: existing.id,
-        memory: existing.memory,
+        memory: candidate,
+        previousMemory,
       })
       continue
     }

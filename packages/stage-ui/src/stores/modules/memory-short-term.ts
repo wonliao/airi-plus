@@ -1,3 +1,5 @@
+import type { ChatProvider } from '@xsai-ext/providers/utils'
+
 import type { MemoryValidationStatus } from './memory-shared'
 
 import { errorMessageFrom } from '@moeru/std'
@@ -16,6 +18,10 @@ import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
+
+import { extractShortTermMemoryCandidatesWithLlm } from '../chat/memory-extraction'
+import { reconcileShortTermMemoryCandidates } from '../chat/memory-reconcile'
+import { useProvidersStore } from '../providers'
 
 const mem0ConnectivityTimeoutMsec = 5_000
 
@@ -39,8 +45,11 @@ interface Mem0SearchResult {
 
 interface Mem0RuntimeDebugEntry {
   at: string
+  captureMode?: 'default' | 'llm-assisted'
+  candidates?: string[]
   latestMemories?: string[]
   message: string
+  operations?: string[]
   payload: string
   resultCount?: number
   status: 'error' | 'skipped' | 'success'
@@ -168,6 +177,30 @@ function parseMem0CapturePayload(payload: unknown): Mem0CaptureResult[] {
     : []
 }
 
+function formatCaptureOperations(
+  items: Array<{ event?: string, memory?: string, previousMemory?: string }> | undefined,
+  fallbackSummary?: string,
+) {
+  const itemOperations = (items ?? [])
+    .filter(item => item.event === 'add' || item.event === 'update')
+    .map((item) => {
+      if (item.event === 'update' && item.previousMemory && item.previousMemory !== item.memory) {
+        return `UPDATE: ${item.previousMemory} -> ${item.memory ?? ''}`
+      }
+
+      return `${String(item.event).toUpperCase()}: ${item.memory ?? ''}`
+    })
+    .filter(Boolean)
+
+  if (itemOperations.length > 0) {
+    return itemOperations
+  }
+
+  return fallbackSummary
+    ? fallbackSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+    : undefined
+}
+
 function buildMem0RecallPrompt(results: Mem0SearchResult[]) {
   if (results.length === 0) {
     return ''
@@ -191,6 +224,9 @@ const defaultShortTermMemorySettings = {
   baseUrl: 'mem0',
   embedder: 'airi-local',
   enabled: true,
+  extractionLlmApiKey: '',
+  extractionLlmModel: '',
+  extractionLlmProvider: '',
   mode: 'open-source',
   searchThreshold: 0.6,
   topK: 5,
@@ -199,6 +235,8 @@ const defaultShortTermMemorySettings = {
 } as const
 
 export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
+  const providersStore = useProvidersStore()
+
   const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', defaultShortTermMemorySettings.enabled)
   const backendId = useLocalStorageManualReset<string>('settings/memory/short-term/backend-id', 'mem0')
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/short-term/validation-status', 'idle')
@@ -208,6 +246,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const userId = useLocalStorageManualReset<string>('settings/memory/short-term/user-id', defaultShortTermMemorySettings.userId)
   const baseUrl = useLocalStorageManualReset<string>('settings/memory/short-term/base-url', defaultShortTermMemorySettings.baseUrl)
   const apiKey = useLocalStorageManualReset<string>('settings/memory/short-term/api-key', '')
+  const extractionLlmProvider = useLocalStorageManualReset<string>('settings/memory/short-term/extraction-llm-provider', defaultShortTermMemorySettings.extractionLlmProvider)
+  const extractionLlmModel = useLocalStorageManualReset<string>('settings/memory/short-term/extraction-llm-model', defaultShortTermMemorySettings.extractionLlmModel)
+  const extractionLlmApiKey = useLocalStorageManualReset<string>('settings/memory/short-term/extraction-llm-api-key', defaultShortTermMemorySettings.extractionLlmApiKey)
   const embedder = useLocalStorageManualReset<string>('settings/memory/short-term/embedder', defaultShortTermMemorySettings.embedder)
   const vectorStore = useLocalStorageManualReset<string>('settings/memory/short-term/vector-store', defaultShortTermMemorySettings.vectorStore)
   const autoRecall = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-recall', defaultShortTermMemorySettings.autoRecall)
@@ -258,6 +299,15 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       || isElectronManagedRelativePath(trimmedBaseUrl)
       || isAbsoluteFilesystemPath(trimmedBaseUrl)
   })
+
+  const extractionLlmConfigured = computed(() =>
+    !!extractionLlmProvider.value.trim()
+    && !!extractionLlmModel.value.trim(),
+  )
+
+  const extractionMode = computed<'default' | 'llm-assisted'>(() =>
+    extractionLlmConfigured.value ? 'llm-assisted' : 'default',
+  )
 
   const configured = computed(() => {
     if (!enabled.value) {
@@ -586,19 +636,95 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       return false
     }
 
+    const latestMemories = await fetchLatestMemories()
+    let captureMessagesForRuntime = usableMessages
+    let extractionSummary = ''
+
+    if (extractionMode.value === 'llm-assisted') {
+      const providerId = extractionLlmProvider.value.trim()
+      const modelId = extractionLlmModel.value.trim()
+
+      try {
+        const provider = await providersStore.getProviderInstance<ChatProvider>(providerId)
+        const extraction = await extractShortTermMemoryCandidatesWithLlm({
+          provider,
+          model: modelId,
+          apiKeyOverride: extractionLlmApiKey.value.trim(),
+          existingMemories: latestMemories,
+          messages: usableMessages,
+        })
+        const operations = reconcileShortTermMemoryCandidates(extraction.candidates, latestMemories)
+        const candidatesToStore = operations
+          .filter(operation => operation.kind === 'add')
+          .map(operation => operation.candidate)
+
+        extractionSummary = [
+          `mode=llm-assisted provider=${providerId} model=${modelId}`,
+          extraction.rawText ? `raw=${extraction.rawText}` : '',
+          ...operations.map((operation) => {
+            return `${operation.kind.toUpperCase()}: ${operation.candidate.fact}${operation.matchedMemory ? ` (matched ${operation.matchedMemory})` : ''}`
+          }),
+        ]
+          .filter(Boolean)
+          .join('\n')
+
+        if (candidatesToStore.length === 0) {
+          setCaptureDebug({
+            at: new Date().toISOString(),
+            captureMode: 'llm-assisted',
+            candidates: extraction.candidates.map(candidate => candidate.fact),
+            latestMemories,
+            message: extraction.error
+              ? `LLM-assisted capture fell back to built-in capture because extraction failed: ${extraction.error}`
+              : 'LLM-assisted capture found no stable memory candidate in this turn.',
+            operations: operations.map((operation) => {
+              return `${operation.kind.toUpperCase()}: ${operation.candidate.fact}${operation.matchedMemory ? ` (matched ${operation.matchedMemory})` : ''}`
+            }),
+            payload: [
+              usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+              extractionSummary,
+            ].filter(Boolean).join('\n\n'),
+            resultCount: 0,
+            status: extraction.error ? 'error' : 'success',
+          })
+
+          if (!extraction.error) {
+            return false
+          }
+        }
+        else {
+          captureMessagesForRuntime = candidatesToStore.map(candidate => ({
+            role: 'user' as const,
+            content: candidate.captureText,
+          }))
+        }
+      }
+      catch (error) {
+        extractionSummary = `mode=llm-assisted provider=${providerId} model=${modelId}\nerror=${errorMessageFrom(error) ?? 'Unknown provider error.'}`
+      }
+    }
+
     try {
       if (usesDesktopRuntime.value) {
         const response = await captureShortTermMemoryOnDesktop({
           baseUrl: baseUrl.value.trim(),
           userId: userId.value.trim(),
-          messages: usableMessages,
+          messages: captureMessagesForRuntime,
         })
 
         setCaptureDebug({
           at: new Date().toISOString(),
+          captureMode: extractionMode.value,
           latestMemories: response?.latestMemories ?? [],
           message: response?.message ?? 'Desktop short-term capture is unavailable.',
-          payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          operations: formatCaptureOperations(response?.items, extractionSummary),
+          payload: [
+            usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+            extractionSummary,
+            captureMessagesForRuntime !== usableMessages
+              ? `capture-input:\n${captureMessagesForRuntime.map(message => `[${message.role}] ${message.content}`).join('\n')}`
+              : '',
+          ].filter(Boolean).join('\n\n'),
           resultCount: response?.items.length ?? 0,
           status: response?.ok ? 'success' : 'error',
         })
@@ -609,7 +735,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         method: 'POST',
         headers: createMem0Headers(apiKey.value.trim(), { contentType: 'application/json' }),
         body: JSON.stringify({
-          messages: usableMessages,
+          messages: captureMessagesForRuntime,
           user_id: userId.value.trim(),
         }),
       })
@@ -618,8 +744,15 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         console.warn(`[mem0] capture failed with HTTP ${response.status}`)
         setCaptureDebug({
           at: new Date().toISOString(),
+          captureMode: extractionMode.value,
           message: `Capture failed with HTTP ${response.status}.`,
-          payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          operations: extractionSummary
+            ? extractionSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+            : undefined,
+          payload: [
+            usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+            extractionSummary,
+          ].filter(Boolean).join('\n\n'),
           status: 'error',
         })
         return false
@@ -630,12 +763,23 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       const latestMemories = await fetchLatestMemories()
       setCaptureDebug({
         at: new Date().toISOString(),
+        captureMode: extractionMode.value,
+        candidates: extractionSummary
+          ? extractionSummary.split('\n').filter(line => line.startsWith('ADD:') || line.startsWith('NONE:')).map(line => line.replace(/^(ADD|NONE):\s*/u, ''))
+          : undefined,
         latestMemories,
         message: results.length > 0
-          ? `Capture sent ${usableMessages.length} message(s) to mem0 and mem0 returned ${results.length} result item(s).`
-          : `Capture sent ${usableMessages.length} message(s) to mem0.`,
-        payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
-        resultCount: results.length || usableMessages.length,
+          ? `Capture sent ${captureMessagesForRuntime.length} message(s) to mem0 and mem0 returned ${results.length} result item(s).`
+          : `Capture sent ${captureMessagesForRuntime.length} message(s) to mem0.`,
+        operations: formatCaptureOperations(results, extractionSummary),
+        payload: [
+          usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          extractionSummary,
+          captureMessagesForRuntime !== usableMessages
+            ? `capture-input:\n${captureMessagesForRuntime.map(message => `[${message.role}] ${message.content}`).join('\n')}`
+            : '',
+        ].filter(Boolean).join('\n\n'),
+        resultCount: results.length || captureMessagesForRuntime.length,
         status: 'success',
       })
       return true
@@ -644,8 +788,15 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       console.warn('[mem0] capture request failed', errorMessageFrom(error) ?? error)
       setCaptureDebug({
         at: new Date().toISOString(),
+        captureMode: extractionMode.value,
+        operations: extractionSummary
+          ? extractionSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+          : undefined,
         message: `Capture request failed: ${errorMessageFrom(error) ?? 'Unknown error.'}`,
-        payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+        payload: [
+          usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          extractionSummary,
+        ].filter(Boolean).join('\n\n'),
         status: 'error',
       })
       return false
@@ -677,6 +828,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     userId.reset()
     baseUrl.reset()
     apiKey.reset()
+    extractionLlmProvider.reset()
+    extractionLlmModel.reset()
+    extractionLlmApiKey.reset()
     embedder.reset()
     vectorStore.reset()
     autoRecall.reset()
@@ -699,6 +853,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     userId,
     baseUrl,
     apiKey,
+    extractionMode,
+    extractionLlmProvider,
+    extractionLlmModel,
+    extractionLlmApiKey,
+    extractionLlmConfigured,
     embedder,
     vectorStore,
     autoRecall,

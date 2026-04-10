@@ -489,6 +489,9 @@ pages:
         configuration:
           title: mem0 配置
           description: 配置 AIRI 用于近期事件、偏好与 recall 导向上下文的短期记忆后端。
+        extraction:
+          title: 记忆提取
+          description: 如果保持为空，短期记忆会继续使用当前内置的 heuristic capture。填写后则会启用 mem0 + llm 的辅助提取路线。
       fields:
         enabled:
           label: 启用短期记忆
@@ -508,6 +511,28 @@ pages:
         apiKey:
           label: API 密钥
           description: 可选的平台凭证，只有在 mem0 使用 platform 模式时才需要。
+          placeholder: sk-...
+        extractionMode:
+          label: 提取模式
+          description: 只有在记忆提取使用的 LLM provider 与 model 都配置完成后，AIRI 才会切到 LLM 辅助提取。
+          default: 默认（当前内置 capture）
+          assisted: LLM 辅助（mem0 + llm）
+        extractionLlmStatus:
+          label: LLM 提取状态
+          description: 只有当 provider 与 model 都已填写时，才会启用 LLM 辅助提取。
+          configured: 已配置 LLM 提取
+          notConfigured: 当前使用内置 capture
+        extractionLlmProvider:
+          label: 提取 LLM Provider
+          description: 仅用于短期记忆提取的 provider 标识，不影响主要聊天回复使用的模型。
+          placeholder: openai
+        extractionLlmModel:
+          label: 提取 LLM Model
+          description: 用于提取记忆候选与偏好的模型。通常使用较小、较便宜的模型就足够。
+          placeholder: gpt-4.1-mini
+        extractionLlmApiKey:
+          label: 提取 LLM API 密钥
+          description: 记忆提取模型的可选覆盖密钥。若 provider 配置已处理认证，可留空。
           placeholder: sk-...
         embedder:
           label: Embedder
@@ -545,6 +570,9 @@ pages:
         lastRecall: 最近一次 recall
         timestamp: 时间
         resultCount: 数量
+        captureMode: Capture 模式
+        candidates: 候选记忆
+        operations: 操作结果
         latestMemories: 最新记忆
         emptyPayload: 没有 payload
         emptyState: 目前还没有 runtime 调试记录。

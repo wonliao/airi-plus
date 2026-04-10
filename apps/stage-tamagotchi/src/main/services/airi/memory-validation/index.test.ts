@@ -222,6 +222,90 @@ describe('short-term memory desktop runtime', () => {
     // REVIEW: This assertion documents the current Vitest fallback when Electron app.getPath
     // is unavailable. Real Electron resolves `mem0` against app.getPath('userData')`.
   })
+
+  it('updates conflicting identity memories instead of keeping stale duplicates', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-update-name-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我叫做Ben。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      const secondCapture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，其實我的名字是Benjamin。' },
+          { role: 'assistant', content: '收到。' },
+        ],
+      })
+
+      expect(secondCapture.ok).toBe(true)
+      expect(secondCapture.items.some(item => item.event === 'update' && item.memory.includes('Benjamin'))).toBe(true)
+      expect(secondCapture.items.find(item => item.event === 'update')?.previousMemory).toContain('Ben')
+
+      const memories = await __memoryValidationTestUtils.listShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        limit: 10,
+      })
+
+      const nameMemories = memories.items.filter(item => item.memory.includes('名字是'))
+      expect(nameMemories).toHaveLength(1)
+      expect(nameMemories[0]?.memory).toContain('Benjamin')
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('updates favorite-subject memories when the same subject changes', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-update-favorite-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我最喜歡的偶像是BLACKPINK。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      const secondCapture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我最喜歡的偶像是NewJeans。' },
+          { role: 'assistant', content: '收到。' },
+        ],
+      })
+
+      expect(secondCapture.ok).toBe(true)
+      expect(secondCapture.items.some(item => item.event === 'update' && item.memory.includes('NewJeans'))).toBe(true)
+      expect(secondCapture.items.find(item => item.event === 'update')?.previousMemory).toContain('BLACKPINK')
+
+      const memories = await __memoryValidationTestUtils.listShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        limit: 10,
+      })
+
+      const idolMemories = memories.items.filter(item => item.memory.includes('最喜歡的偶像是'))
+      expect(idolMemories).toHaveLength(1)
+      expect(idolMemories[0]?.memory).toContain('NewJeans')
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
 })
 
 function appDataRootFromWorkspace(workspacePath: string) {

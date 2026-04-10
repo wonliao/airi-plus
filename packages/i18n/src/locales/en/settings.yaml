@@ -519,6 +519,9 @@ pages:
         configuration:
           title: mem0 configuration
           description: Configure the short-term memory backend AIRI should use for recent events, preferences, and recall-oriented context.
+        extraction:
+          title: Memory extraction
+          description: Leave these fields empty to keep the current built-in heuristic capture. Fill them to enable mem0-style LLM-assisted extraction for short-term memory capture.
       fields:
         enabled:
           label: Enable short-term memory
@@ -538,6 +541,28 @@ pages:
         apiKey:
           label: API key
           description: Optional platform credential. Required only when mem0 is used in platform mode.
+          placeholder: sk-...
+        extractionMode:
+          label: Extraction mode
+          description: AIRI stays on the current built-in capture flow until a memory extraction LLM provider and model are configured.
+          default: Default (current built-in capture)
+          assisted: LLM-assisted (mem0 + llm)
+        extractionLlmStatus:
+          label: LLM extraction status
+          description: LLM-assisted extraction turns on only when both provider and model are configured.
+          configured: LLM extraction configured
+          notConfigured: Using current built-in capture
+        extractionLlmProvider:
+          label: Extraction LLM provider
+          description: Provider identifier used only for short-term memory extraction, not for the main chat response.
+          placeholder: openai
+        extractionLlmModel:
+          label: Extraction LLM model
+          description: Small, cheap models are usually enough for extracting memory candidates and preferences.
+          placeholder: gpt-4.1-mini
+        extractionLlmApiKey:
+          label: Extraction LLM API key
+          description: Optional override credential for the extraction model. Leave empty if the provider configuration already manages authentication.
           placeholder: sk-...
         embedder:
           label: Embedder
@@ -575,6 +600,9 @@ pages:
         lastRecall: Last recall
         timestamp: Time
         resultCount: Count
+        captureMode: Capture mode
+        candidates: Candidates
+        operations: Operations
         latestMemories: Latest memories
         emptyPayload: No payload
         emptyState: No runtime debug entry yet.

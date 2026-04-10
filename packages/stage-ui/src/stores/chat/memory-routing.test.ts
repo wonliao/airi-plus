@@ -19,6 +19,19 @@ describe('determineMemoryRecallStrategy', () => {
     expect(result.shouldRecallLongTerm).toBe(true)
   })
 
+  it('routes idol preference prompts to short-term recall only', () => {
+    const chineseResult = determineMemoryRecallStrategy('我的偶像是什麼？')
+    const englishResult = determineMemoryRecallStrategy('What is my favorite idol?')
+
+    expect(chineseResult.route).toBe('personal-memory')
+    expect(chineseResult.shouldRecallShortTerm).toBe(true)
+    expect(chineseResult.shouldRecallLongTerm).toBe(false)
+
+    expect(englishResult.route).toBe('personal-memory')
+    expect(englishResult.shouldRecallShortTerm).toBe(true)
+    expect(englishResult.shouldRecallLongTerm).toBe(false)
+  })
+
   it('falls back to hybrid recall for ambiguous prompts', () => {
     const result = determineMemoryRecallStrategy('今天可以聊點什麼？')
 

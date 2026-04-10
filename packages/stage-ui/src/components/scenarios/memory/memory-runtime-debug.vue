@@ -21,8 +21,11 @@ const {
 
 interface RuntimeDebugEntry {
   at: string
+  captureMode?: string
+  candidates: string[]
   latestItems: string[]
   message: string
+  operations: string[]
   payload: string
   resultCount?: number
   status?: 'error' | 'skipped' | 'success'
@@ -63,8 +66,10 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
   if (typeof value === 'string') {
     return {
       at: '',
+      candidates: [],
       latestItems: [],
       message: value,
+      operations: [],
       payload: '',
     }
   }
@@ -75,9 +80,12 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
 
   const record = value as {
     at?: unknown
+    captureMode?: unknown
+    candidates?: unknown
     latestMemories?: unknown
     latestSources?: unknown
     message?: unknown
+    operations?: unknown
     payload?: unknown
     resultCount?: unknown
     status?: unknown
@@ -85,11 +93,14 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
 
   return {
     at: toDisplayText(record.at),
+    captureMode: toDisplayText(record.captureMode),
+    candidates: toStringArray(record.candidates),
     latestItems: [
       ...toStringArray(record.latestMemories),
       ...toStringArray(record.latestSources),
     ],
     message: toDisplayText(record.message),
+    operations: toStringArray(record.operations),
     payload: toDisplayText(record.payload),
     resultCount: typeof record.resultCount === 'number'
       ? record.resultCount
@@ -200,6 +211,26 @@ const sections = computed(() => [
             <div v-if="typeof section.entry.resultCount === 'number'">
               {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}:
               {{ section.entry.resultCount }}
+            </div>
+            <div v-if="section.entry.captureMode">
+              {{ $t('settings.pages.modules.memory-short-term.debug.captureMode') }}:
+              {{ section.entry.captureMode }}
+            </div>
+            <div v-if="section.entry.candidates.length" :class="['flex flex-col gap-1']">
+              <div>{{ $t('settings.pages.modules.memory-short-term.debug.candidates') }}:</div>
+              <ul :class="['list-disc pl-4']">
+                <li v-for="item in section.entry.candidates" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="section.entry.operations.length" :class="['flex flex-col gap-1']">
+              <div>{{ $t('settings.pages.modules.memory-short-term.debug.operations') }}:</div>
+              <ul :class="['list-disc pl-4']">
+                <li v-for="item in section.entry.operations" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
             </div>
             <div v-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
               <div>{{ section.latestItemsLabel }}:</div>

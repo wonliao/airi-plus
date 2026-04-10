@@ -133,6 +133,7 @@ export interface ShortTermMemoryCaptureResultItem {
   event: 'add' | 'update'
   id: string
   memory: string
+  previousMemory?: string
 }
 
 export interface ShortTermMemoryCaptureResult {

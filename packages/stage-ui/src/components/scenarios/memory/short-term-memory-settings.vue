@@ -17,6 +17,11 @@ const {
   userId,
   baseUrl,
   apiKey,
+  extractionMode,
+  extractionLlmConfigured,
+  extractionLlmProvider,
+  extractionLlmModel,
+  extractionLlmApiKey,
   embedder,
   vectorStore,
   autoRecall,
@@ -116,6 +121,97 @@ const modeOptions = [
         </div>
 
         <div :class="['rounded-2xl border p-5', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
+          <div :class="['mb-5 flex flex-col gap-2']">
+            <div :class="['flex items-center justify-between gap-3']">
+              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.sections.extraction.title') }}
+              </div>
+
+              <span
+                :class="[
+                  'rounded-full px-2.5 py-1 text-xs font-medium',
+                  extractionLlmConfigured
+                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
+                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300',
+                ]"
+              >
+                {{ extractionMode === 'llm-assisted'
+                  ? $t('settings.pages.modules.memory-short-term.fields.extractionMode.assisted')
+                  : $t('settings.pages.modules.memory-short-term.fields.extractionMode.default') }}
+              </span>
+            </div>
+
+            <p :class="['text-sm text-neutral-600 dark:text-neutral-400']">
+              {{ $t('settings.pages.modules.memory-short-term.sections.extraction.description') }}
+            </p>
+          </div>
+
+          <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
+            <div :class="['flex flex-col gap-2']">
+              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionMode.label') }}
+              </div>
+              <div
+                :class="[
+                  'rounded-xl border px-3 py-2 text-sm',
+                  'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-200',
+                ]"
+              >
+                {{ extractionMode === 'llm-assisted'
+                  ? $t('settings.pages.modules.memory-short-term.fields.extractionMode.assisted')
+                  : $t('settings.pages.modules.memory-short-term.fields.extractionMode.default') }}
+              </div>
+              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionMode.description') }}
+              </div>
+            </div>
+
+            <div :class="['flex flex-col gap-2']">
+              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.label') }}
+              </div>
+              <div
+                :class="[
+                  'rounded-xl border px-3 py-2 text-sm',
+                  extractionLlmConfigured
+                    ? 'border-primary-200 bg-primary-50 text-primary-700 dark:border-primary-900/40 dark:bg-primary-950/30 dark:text-primary-200'
+                    : 'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-200',
+                ]"
+              >
+                {{ extractionLlmConfigured
+                  ? $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.configured')
+                  : $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.notConfigured') }}
+              </div>
+              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.description') }}
+              </div>
+            </div>
+
+            <FieldInput
+              v-model="extractionLlmProvider"
+              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.placeholder')"
+            />
+
+            <FieldInput
+              v-model="extractionLlmModel"
+              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.placeholder')"
+            />
+
+            <FieldInput
+              v-model="extractionLlmApiKey"
+              type="password"
+              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.placeholder')"
+            />
+          </div>
+        </div>
+
+        <div :class="['rounded-2xl border p-5', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
           <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
             <FieldCheckbox
               v-model="autoRecall"
@@ -202,6 +298,25 @@ const modeOptions = [
                 <div>{{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}: {{ lastCaptureDebug.at }}</div>
                 <div v-if="typeof lastCaptureDebug.resultCount === 'number'">
                   {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}: {{ lastCaptureDebug.resultCount }}
+                </div>
+                <div v-if="lastCaptureDebug.captureMode">
+                  {{ $t('settings.pages.modules.memory-short-term.debug.captureMode') }}: {{ lastCaptureDebug.captureMode }}
+                </div>
+                <div v-if="lastCaptureDebug.candidates?.length" :class="['flex flex-col gap-1']">
+                  <div>{{ $t('settings.pages.modules.memory-short-term.debug.candidates') }}:</div>
+                  <ul :class="['list-disc pl-4']">
+                    <li v-for="candidate in lastCaptureDebug.candidates" :key="candidate">
+                      {{ candidate }}
+                    </li>
+                  </ul>
+                </div>
+                <div v-if="lastCaptureDebug.operations?.length" :class="['flex flex-col gap-1']">
+                  <div>{{ $t('settings.pages.modules.memory-short-term.debug.operations') }}:</div>
+                  <ul :class="['list-disc pl-4']">
+                    <li v-for="operation in lastCaptureDebug.operations" :key="operation">
+                      {{ operation }}
+                    </li>
+                  </ul>
                 </div>
                 <pre :class="['overflow-x-auto rounded-lg bg-neutral-100 p-3 whitespace-pre-wrap break-words dark:bg-neutral-900']">{{ lastCaptureDebug.payload || $t('settings.pages.modules.memory-short-term.debug.emptyPayload') }}</pre>
               </div>
