@@ -302,7 +302,24 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   const extractionLlmConfigured = computed(() =>
     !!extractionLlmProvider.value.trim()
-    && !!extractionLlmModel.value.trim(),
+    && !!extractionLlmModel.value.trim()
+    && !!providersStore.configuredProviders[extractionLlmProvider.value.trim()],
+  )
+
+  const extractionProviderOptions = computed(() =>
+    providersStore.configuredChatProvidersMetadata.map(provider => ({
+      description: provider.localizedDescription || provider.description,
+      label: provider.localizedName || provider.name,
+      value: provider.id,
+    })),
+  )
+
+  const extractionModelOptions = computed(() =>
+    providersStore.getModelsForProvider(extractionLlmProvider.value.trim()).map(model => ({
+      description: model.description || model.provider,
+      label: model.name || model.id,
+      value: model.id,
+    })),
   )
 
   const extractionMode = computed<'default' | 'llm-assisted'>(() =>
@@ -334,6 +351,19 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   function resetValidationState() {
     validationStatus.reset()
     lastValidation.reset()
+  }
+
+  async function ensureExtractionProviderModelsLoaded() {
+    const providerId = extractionLlmProvider.value.trim()
+    if (!providerId || !providersStore.configuredProviders[providerId]) {
+      return
+    }
+
+    if (providersStore.getModelsForProvider(providerId).length > 0) {
+      return
+    }
+
+    await providersStore.fetchModelsForProvider(providerId)
   }
 
   function setCaptureDebug(entry: Mem0RuntimeDebugEntry) {
@@ -649,7 +679,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         const extraction = await extractShortTermMemoryCandidatesWithLlm({
           provider,
           model: modelId,
-          apiKeyOverride: extractionLlmApiKey.value.trim(),
           existingMemories: latestMemories,
           messages: usableMessages,
         })
@@ -858,6 +887,8 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     extractionLlmModel,
     extractionLlmApiKey,
     extractionLlmConfigured,
+    extractionProviderOptions,
+    extractionModelOptions,
     embedder,
     vectorStore,
     autoRecall,
@@ -869,6 +900,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     buildRecallPrompt,
     captureMessages,
     markRecallSkipped,
+    ensureExtractionProviderModelsLoaded,
     searchMemories,
     validateConfiguration,
     resetValidationState,

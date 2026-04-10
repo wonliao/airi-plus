@@ -544,26 +544,21 @@ pages:
           placeholder: sk-...
         extractionMode:
           label: Extraction mode
-          description: AIRI stays on the current built-in capture flow until a memory extraction LLM provider and model are configured.
           default: Default (current built-in capture)
           assisted: LLM-assisted (mem0 + llm)
         extractionLlmStatus:
           label: LLM extraction status
-          description: LLM-assisted extraction turns on only when both provider and model are configured.
+          description: Choose a configured chat provider and one of its models to enable LLM-assisted extraction.
           configured: LLM extraction configured
           notConfigured: Using current built-in capture
         extractionLlmProvider:
-          label: Extraction LLM provider
-          description: Provider identifier used only for short-term memory extraction, not for the main chat response.
-          placeholder: openai
+          label: Extraction provider
+          description: Select from configured chat providers, similar to the normal provider settings flow.
+          placeholder: Select a configured provider
         extractionLlmModel:
-          label: Extraction LLM model
-          description: Small, cheap models are usually enough for extracting memory candidates and preferences.
-          placeholder: gpt-4.1-mini
-        extractionLlmApiKey:
-          label: Extraction LLM API key
-          description: Optional override credential for the extraction model. Leave empty if the provider configuration already manages authentication.
-          placeholder: sk-...
+          label: Extraction model
+          description: Select one of the models exposed by the chosen provider.
+          placeholder: Select a model
         embedder:
           label: Embedder
           description: Embedding backend or configuration identifier used for recall.

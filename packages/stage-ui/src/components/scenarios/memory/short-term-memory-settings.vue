@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { FieldCheckbox, FieldInput, FieldRange, Select } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
+import { onMounted, watch } from 'vue'
 
 import MemoryValidationAlerts from './memory-validation-alerts.vue'
 
@@ -21,7 +22,8 @@ const {
   extractionLlmConfigured,
   extractionLlmProvider,
   extractionLlmModel,
-  extractionLlmApiKey,
+  extractionProviderOptions,
+  extractionModelOptions,
   embedder,
   vectorStore,
   autoRecall,
@@ -36,6 +38,23 @@ const modeOptions = [
   { label: 'Open Source', value: 'open-source', description: 'Self-managed mem0 setup' },
   { label: 'Platform', value: 'platform', description: 'Managed mem0 platform mode' },
 ]
+
+watch(extractionLlmProvider, async (providerId, previousProviderId) => {
+  if (!providerId.trim()) {
+    extractionLlmModel.value = ''
+    return
+  }
+
+  await store.ensureExtractionProviderModelsLoaded()
+
+  if (providerId !== previousProviderId) {
+    extractionLlmModel.value = extractionModelOptions.value[0]?.value ?? ''
+  }
+}, { immediate: true })
+
+onMounted(async () => {
+  await store.ensureExtractionProviderModelsLoaded()
+})
 </script>
 
 <template>
@@ -149,25 +168,6 @@ const modeOptions = [
           <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
             <div :class="['flex flex-col gap-2']">
               <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionMode.label') }}
-              </div>
-              <div
-                :class="[
-                  'rounded-xl border px-3 py-2 text-sm',
-                  'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-200',
-                ]"
-              >
-                {{ extractionMode === 'llm-assisted'
-                  ? $t('settings.pages.modules.memory-short-term.fields.extractionMode.assisted')
-                  : $t('settings.pages.modules.memory-short-term.fields.extractionMode.default') }}
-              </div>
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionMode.description') }}
-              </div>
-            </div>
-
-            <div :class="['flex flex-col gap-2']">
-              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
                 {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.label') }}
               </div>
               <div
@@ -187,27 +187,33 @@ const modeOptions = [
               </div>
             </div>
 
-            <FieldInput
-              v-model="extractionLlmProvider"
-              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.placeholder')"
-            />
+            <div :class="['flex flex-col gap-4']">
+              <div :class="['text-sm font-medium']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.label') }}
+              </div>
+              <Select
+                v-model="extractionLlmProvider"
+                :options="extractionProviderOptions"
+                :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.placeholder')"
+              />
+              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.description') }}
+              </div>
+            </div>
 
-            <FieldInput
-              v-model="extractionLlmModel"
-              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.placeholder')"
-            />
-
-            <FieldInput
-              v-model="extractionLlmApiKey"
-              type="password"
-              :label="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmApiKey.placeholder')"
-            />
+            <div :class="['flex flex-col gap-4']">
+              <div :class="['text-sm font-medium']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.label') }}
+              </div>
+              <Select
+                v-model="extractionLlmModel"
+                :options="extractionModelOptions"
+                :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.placeholder')"
+              />
+              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.description') }}
+              </div>
+            </div>
           </div>
         </div>
 

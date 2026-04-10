@@ -505,26 +505,21 @@ pages:
           placeholder: sk-...
         extractionMode:
           label: 抽取模式
-          description: 只有在記憶抽取用的 LLM provider 與 model 都配置完成後，AIRI 才會切到 LLM 輔助抽取。
           default: 預設（目前內建 capture）
           assisted: LLM 輔助（mem0 + llm）
         extractionLlmStatus:
           label: LLM 抽取狀態
-          description: 只有當 provider 與 model 都有填時，才會啟用 LLM 輔助抽取。
+          description: 比照一般 provider 設定方式，選好已配置的聊天服務來源與模型後，就會啟用 LLM 輔助抽取。
           configured: 已配置 LLM 抽取
           notConfigured: 目前使用內建 capture
         extractionLlmProvider:
-          label: 抽取 LLM Provider
-          description: 只用於短期記憶抽取的 provider 識別，不影響主要聊天回覆用的模型。
-          placeholder: openai
+          label: 提取服務來源
+          description: 從已配置好的聊天 provider 中直接選擇，不再另外手填記憶提取憑證。
+          placeholder: 選擇已配置的服務來源
         extractionLlmModel:
-          label: 抽取 LLM Model
-          description: 用來抽取記憶候選與偏好的模型。通常使用較小、較便宜的模型就足夠。
-          placeholder: gpt-4.1-mini
-        extractionLlmApiKey:
-          label: 抽取 LLM API 金鑰
-          description: 記憶抽取模型的可選覆寫金鑰。若 provider 設定已處理驗證，可留空。
-          placeholder: sk-...
+          label: 提取模型
+          description: 從所選服務來源已列出的模型中挑一個即可。
+          placeholder: 選擇模型
         embedder:
           label: Embedder
           description: 用於 recall 的 embedding 後端或設定識別碼。

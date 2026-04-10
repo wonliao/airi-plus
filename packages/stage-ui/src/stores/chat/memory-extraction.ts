@@ -86,7 +86,6 @@ function buildExtractionPrompt(params: {
 }
 
 export async function extractShortTermMemoryCandidatesWithLlm(params: {
-  apiKeyOverride?: string
   existingMemories: string[]
   messages: Array<{ role: 'assistant' | 'user', content: string }>
   model: string
@@ -96,7 +95,6 @@ export async function extractShortTermMemoryCandidatesWithLlm(params: {
     const providerConfig = params.provider.chat(params.model)
     const response = await generateText({
       ...providerConfig,
-      ...(params.apiKeyOverride?.trim() ? { apiKey: params.apiKeyOverride.trim() } : {}),
       model: params.model,
       messages: message.messages(
         message.system('You are a memory extraction engine.'),
