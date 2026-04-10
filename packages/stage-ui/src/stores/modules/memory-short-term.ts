@@ -3,6 +3,7 @@ import type { MemoryValidationStatus } from './memory-shared'
 import { errorMessageFrom } from '@moeru/std'
 import { isUrl } from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
+import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
 
@@ -39,6 +40,10 @@ interface Mem0CaptureResult {
   event?: string
   id?: string
   memory?: string
+}
+
+function isLegacyBrokenDebugEntry(value: unknown): value is '[object Object]' {
+  return value === '[object Object]'
 }
 
 function toDirectoryUrl(baseUrl: URL) {
@@ -186,8 +191,20 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const autoCapture = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-capture', false)
   const topK = useLocalStorageManualReset<number>('settings/memory/short-term/top-k', 5)
   const searchThreshold = useLocalStorageManualReset<number>('settings/memory/short-term/search-threshold', 0.6)
-  const lastCaptureDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-capture', null)
-  const lastRecallDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-recall', null)
+  const lastCaptureDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-capture', null, {
+    serializer: StorageSerializers.object,
+  })
+  const lastRecallDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-recall', null, {
+    serializer: StorageSerializers.object,
+  })
+
+  if (isLegacyBrokenDebugEntry(lastCaptureDebug.value)) {
+    lastCaptureDebug.value = null
+  }
+
+  if (isLegacyBrokenDebugEntry(lastRecallDebug.value)) {
+    lastRecallDebug.value = null
+  }
 
   const configured = computed(() => {
     if (!enabled.value) {

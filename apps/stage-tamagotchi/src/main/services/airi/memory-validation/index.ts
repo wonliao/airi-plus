@@ -1,5 +1,6 @@
 import type { createContext } from '@moeru/eventa/adapters/electron/main'
 import type {
+  LlmWikiDefaultWorkspaceResult,
   LlmWikiQueryMode,
   LlmWikiQueryPayload,
   LlmWikiQueryResult,
@@ -9,12 +10,13 @@ import type {
 } from '@proj-airi/stage-shared'
 
 import { constants } from 'node:fs'
-import { access, readdir, readFile, stat } from 'node:fs/promises'
-import { basename, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path'
+import { access, copyFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path'
 
 import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
-import { electronQueryLlmWiki, electronValidateLlmWikiWorkspace } from '@proj-airi/stage-shared'
+import { electronEnsureDefaultLlmWikiWorkspace, electronQueryLlmWiki, electronValidateLlmWikiWorkspace } from '@proj-airi/stage-shared'
+import { app } from 'electron'
 
 function ensureTrailingSeparator(value: string) {
   return value.endsWith(sep) ? value : `${value}${sep}`
@@ -30,6 +32,22 @@ function isPathInsideWorkspace(workspacePath: string, targetPath: string) {
 
 function resolveWorkspaceFilePath(workspacePath: string, filePath: string) {
   return normalize(isAbsolute(filePath) ? resolve(filePath) : resolve(workspacePath, filePath))
+}
+
+function isDefaultWorkspaceAlias(value: string) {
+  return value.trim().toLowerCase() === 'llm-wiki'
+}
+
+function getDefaultWorkspacePath() {
+  return joinUserDataPath('llm-wiki')
+}
+
+function getSeedWorkspacePath() {
+  return resolve(import.meta.dirname, '../../../../../resources/llm-wiki-seed')
+}
+
+function joinUserDataPath(...paths: string[]) {
+  return resolve(app.getPath('userData'), ...paths)
 }
 
 async function assertReadableDirectory(path: string, label: string) {
@@ -48,6 +66,53 @@ async function assertReadableFile(path: string, label: string) {
   }
 }
 
+async function copyDirectoryContents(sourcePath: string, targetPath: string) {
+  await mkdir(targetPath, { recursive: true })
+  const entries = await readdir(sourcePath, { withFileTypes: true })
+
+  await Promise.all(entries.map(async (entry) => {
+    const sourceEntryPath = resolve(sourcePath, entry.name)
+    const targetEntryPath = resolve(targetPath, entry.name)
+
+    if (entry.isDirectory()) {
+      await copyDirectoryContents(sourceEntryPath, targetEntryPath)
+      return
+    }
+
+    await mkdir(dirname(targetEntryPath), { recursive: true })
+    await copyFile(sourceEntryPath, targetEntryPath)
+  }))
+}
+
+async function ensureDefaultWorkspaceFromPaths(params: {
+  workspacePath: string
+  seedWorkspacePath: string
+}): Promise<LlmWikiDefaultWorkspaceResult> {
+  const workspacePath = params.workspacePath
+  const indexPath = resolve(workspacePath, 'index.md')
+  const overviewPath = resolve(workspacePath, 'wiki/overview.md')
+
+  let initialized = false
+
+  try {
+    await assertReadableDirectory(workspacePath, 'Default llm-wiki workspace')
+    await assertReadableFile(indexPath, 'Default llm-wiki index path')
+    await assertReadableFile(overviewPath, 'Default llm-wiki overview path')
+  }
+  catch {
+    await assertReadableDirectory(params.seedWorkspacePath, 'Seed llm-wiki workspace')
+    await copyDirectoryContents(params.seedWorkspacePath, workspacePath)
+    initialized = true
+  }
+
+  return {
+    initialized,
+    indexPath,
+    overviewPath,
+    workspacePath,
+  }
+}
+
 interface SearchDocument {
   kind: 'index' | 'overview' | 'page'
   path: string
@@ -55,6 +120,9 @@ interface SearchDocument {
   title: string
   content: string
 }
+
+type SearchDocumentCategory = 'comparison' | 'entity' | 'overview' | 'persona' | 'source' | 'synthesis' | 'topic' | 'unknown'
+type QueryIntent = 'entity' | 'fact' | 'overview' | 'topic'
 
 function stripFrontmatter(content: string) {
   return content.replace(/^---\n[\s\S]*?\n---\n?/u, '').trim()
@@ -101,6 +169,89 @@ function extractSearchTerms(query: string) {
     .slice(0, 16)
 }
 
+function expandQueryAliases(query: string, terms: string[]) {
+  const normalizedQuery = normalizeSearchText(query)
+  const aliases = new Set(terms)
+
+  const aliasEntries: Array<{ when: RegExp, values: string[] }> = [
+    {
+      when: /一級魔法使考試|一级魔法使考试|第一級魔法使考試|第一级魔法使考试/u,
+      values: ['第一級魔法使考試', '第一级魔法使考试', 'first-class-mage-exam'],
+    },
+    {
+      when: /勇者一行人|hero party/u,
+      values: ['hero-party', 'hero party', 'hero-party-members'],
+    },
+    {
+      when: /芙莉蓮.*關係|芙莉莲.*关系|frieren.*relationship/u,
+      values: ['frieren-relationship-map', 'relationship map'],
+    },
+    {
+      when: /誰是\s*himmel|who is himmel|himmel/u,
+      values: ['himmel'],
+    },
+  ]
+
+  for (const entry of aliasEntries) {
+    if (entry.when.test(normalizedQuery)) {
+      for (const value of entry.values) {
+        aliases.add(normalizeSearchText(value))
+      }
+    }
+  }
+
+  return [...aliases]
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length)
+    .slice(0, 24)
+}
+
+function inferDocumentCategory(document: SearchDocument): SearchDocumentCategory {
+  if (document.kind === 'overview') {
+    return 'overview'
+  }
+
+  const normalizedPath = normalizeSearchText(document.relativePath)
+  if (normalizedPath.includes('/topics/')) {
+    return 'topic'
+  }
+  if (normalizedPath.includes('/entities/')) {
+    return 'entity'
+  }
+  if (normalizedPath.includes('/sources/')) {
+    return 'source'
+  }
+  if (normalizedPath.includes('/persona/')) {
+    return 'persona'
+  }
+  if (normalizedPath.includes('/comparisons/')) {
+    return 'comparison'
+  }
+  if (normalizedPath.includes('/synthesis/')) {
+    return 'synthesis'
+  }
+
+  return 'unknown'
+}
+
+function inferQueryIntent(query: string): QueryIntent {
+  const normalizedQuery = normalizeSearchText(query)
+
+  if (/誰是|是谁|who is|是誰/u.test(normalizedQuery)) {
+    return 'entity'
+  }
+
+  if (/關係|关系|relationship|互動|互动/u.test(normalizedQuery)) {
+    return 'topic'
+  }
+
+  if (/是什麼|是什么|what is|如何理解|怎麼看|怎么看|世界觀|世界观|考試|考试|旅程|結構|结构|系統|系统|主題|主题/u.test(normalizedQuery)) {
+    return 'topic'
+  }
+
+  return 'fact'
+}
+
 function getKindWeight(kind: SearchDocument['kind'], queryMode: LlmWikiQueryMode) {
   if (queryMode === 'digest') {
     return kind === 'overview' ? 18 : kind === 'index' ? 14 : 4
@@ -113,11 +264,32 @@ function getKindWeight(kind: SearchDocument['kind'], queryMode: LlmWikiQueryMode
   return kind === 'overview' ? 10 : kind === 'page' ? 9 : 7
 }
 
+function getCategoryIntentWeight(category: SearchDocumentCategory, intent: QueryIntent) {
+  if (intent === 'entity') {
+    return category === 'entity' ? 20 : category === 'topic' ? 8 : category === 'source' ? -8 : 0
+  }
+
+  if (intent === 'topic') {
+    return category === 'topic' ? 26 : category === 'overview' ? 14 : category === 'entity' ? -8 : category === 'source' ? -12 : 0
+  }
+
+  if (intent === 'overview') {
+    return category === 'overview' ? 18 : category === 'topic' ? 8 : 0
+  }
+
+  return category === 'entity' ? 6 : category === 'topic' ? 6 : category === 'source' ? -4 : 0
+}
+
 function scoreDocument(document: SearchDocument, query: string, queryMode: LlmWikiQueryMode, terms: string[]) {
   const haystack = normalizeSearchText(`${document.title}\n${document.relativePath}\n${document.content}`)
   const normalizedQuery = normalizeSearchText(query)
+  const normalizedTitle = normalizeSearchText(document.title)
+  const normalizedPath = normalizeSearchText(document.relativePath)
+  const category = inferDocumentCategory(document)
+  const intent = inferQueryIntent(query)
 
   let score = getKindWeight(document.kind, queryMode)
+  score += getCategoryIntentWeight(category, intent)
 
   if (normalizedQuery && haystack.includes(normalizedQuery)) {
     score += 28
@@ -128,11 +300,19 @@ function scoreDocument(document: SearchDocument, query: string, queryMode: LlmWi
       continue
     }
 
-    if (normalizeSearchText(document.title).includes(term)) {
+    if (normalizedTitle === term) {
+      score += 26
+    }
+
+    if (normalizedPath.includes(`/${term}.md`) || normalizedPath.endsWith(`/${term}`)) {
+      score += 36
+    }
+
+    if (normalizedTitle.includes(term)) {
       score += 16
     }
 
-    if (normalizeSearchText(document.relativePath).includes(term)) {
+    if (normalizedPath.includes(term)) {
       score += 10
     }
 
@@ -234,9 +414,27 @@ async function loadSearchDocuments(params: {
 }
 
 async function validateWorkspace(payload: LlmWikiWorkspaceValidationPayload): Promise<LlmWikiWorkspaceValidationResult> {
-  const resolvedWorkspacePath = normalize(resolve(payload.workspacePath))
-  const resolvedIndexPath = resolveWorkspaceFilePath(resolvedWorkspacePath, payload.indexPath)
-  const resolvedOverviewPath = resolveWorkspaceFilePath(resolvedWorkspacePath, payload.overviewPath)
+  return validateWorkspaceFromPaths({
+    workspacePath: payload.workspacePath,
+    indexPath: payload.indexPath,
+    overviewPath: payload.overviewPath,
+    defaultWorkspacePath: isDefaultWorkspaceAlias(payload.workspacePath)
+      ? (await ensureDefaultWorkspace()).workspacePath
+      : payload.workspacePath,
+  })
+}
+
+async function validateWorkspaceFromPaths(params: {
+  workspacePath: string
+  indexPath: string
+  overviewPath: string
+  defaultWorkspacePath: string
+}): Promise<LlmWikiWorkspaceValidationResult> {
+  const resolvedWorkspacePath = isDefaultWorkspaceAlias(params.workspacePath)
+    ? normalize(resolve(params.defaultWorkspacePath))
+    : normalize(resolve(params.workspacePath))
+  const resolvedIndexPath = resolveWorkspaceFilePath(resolvedWorkspacePath, params.indexPath)
+  const resolvedOverviewPath = resolveWorkspaceFilePath(resolvedWorkspacePath, params.overviewPath)
 
   if (!isPathInsideWorkspace(resolvedWorkspacePath, resolvedIndexPath)) {
     return {
@@ -282,6 +480,13 @@ async function validateWorkspace(payload: LlmWikiWorkspaceValidationPayload): Pr
   }
 }
 
+async function ensureDefaultWorkspace(): Promise<LlmWikiDefaultWorkspaceResult> {
+  return ensureDefaultWorkspaceFromPaths({
+    workspacePath: getDefaultWorkspacePath(),
+    seedWorkspacePath: getSeedWorkspacePath(),
+  })
+}
+
 async function queryWorkspace(payload: LlmWikiQueryPayload): Promise<LlmWikiQueryResult> {
   const validation = await validateWorkspace(payload)
   if (!validation.valid) {
@@ -307,7 +512,7 @@ async function queryWorkspace(payload: LlmWikiQueryPayload): Promise<LlmWikiQuer
       indexPath: validation.resolvedIndexPath,
       overviewPath: validation.resolvedOverviewPath,
     })
-    const terms = extractSearchTerms(query)
+    const terms = expandQueryAliases(query, extractSearchTerms(query))
     const maxResults = Math.max(1, Math.min(payload.maxResults ?? 4, 8))
 
     const items = documents
@@ -347,11 +552,35 @@ async function queryWorkspace(payload: LlmWikiQueryPayload): Promise<LlmWikiQuer
 }
 
 export function createMemoryValidationService(params: { context: ReturnType<typeof createContext>['context'] }) {
+  const defaultWorkspaceReady = ensureDefaultWorkspace().catch((error) => {
+    // NOTICE: AIRI Electron should own a default llm-wiki workspace even before the renderer
+    // explicitly requests validation. Initializing it eagerly here keeps the settings page from
+    // depending on a first successful IPC roundtrip before it can show a usable workspace path.
+    console.warn('[llm-wiki] Failed to initialize default workspace during service startup:', errorMessageFrom(error) ?? error)
+    return undefined
+  })
+
   defineInvokeHandler(params.context, electronValidateLlmWikiWorkspace, async (payload) => {
     return validateWorkspace(payload)
+  })
+
+  defineInvokeHandler(params.context, electronEnsureDefaultLlmWikiWorkspace, async () => {
+    return await defaultWorkspaceReady ?? ensureDefaultWorkspace()
   })
 
   defineInvokeHandler(params.context, electronQueryLlmWiki, async (payload) => {
     return queryWorkspace(payload)
   })
+}
+
+export const __memoryValidationTestUtils = {
+  ensureDefaultWorkspace,
+  ensureDefaultWorkspaceFromPaths,
+  validateWorkspaceFromPaths,
+  expandQueryAliases,
+  extractSearchTerms,
+  inferDocumentCategory,
+  inferQueryIntent,
+  queryWorkspace,
+  scoreDocument,
 }

@@ -440,8 +440,8 @@ pages:
           description: 允許 AIRI 使用 llm-wiki 維護整理過的長期知識工作區。
         workspacePath:
           label: 工作區路徑
-          description: llm-wiki 工作區所在的根目錄。
-          placeholder: /path/to/wiki-workspace
+          description: llm-wiki 工作區所在的根目錄。在 AIRI Electron 裡也可以直接填 llm-wiki，系統會自動解析到 app data 內建工作區。
+          placeholder: llm-wiki 或 /path/to/wiki-workspace
         indexPath:
           label: 索引路徑
           description: AIRI 應視為 wiki 索引入口的檔案。
@@ -469,7 +469,7 @@ pages:
           placeholder: 在此描述工作區慣例、digest 指令或審核規則。
       notes:
         title: 首版範圍
-        content: 此頁面現在已支援桌面版 llm-wiki 查詢 recall，以及設定與驗證；完整的 ingest 與 promotion 自動化可於後續再接入。
+        content: 此頁面現在已支援桌面版 llm-wiki 查詢 recall，以及設定與驗證；在 AIRI Electron 上，如果尚未設定工作區路徑，系統會先在 app data 目錄初始化一份預設 llm-wiki 工作區。完整的 ingest 與 promotion 自動化可於後續再接入。
       debug:
         lastRecall: 最近一次 llm-wiki recall
         latestSources: 最新來源

@@ -1,14 +1,30 @@
 import type { MemoryValidationStatus } from './memory-shared'
 
 import { errorMessageFrom } from '@moeru/std'
-import { isStageTamagotchi, queryLlmWikiOnDesktop, validateLlmWikiWorkspaceOnDesktop } from '@proj-airi/stage-shared'
+import { ensureDefaultLlmWikiWorkspaceOnDesktop, isStageTamagotchi, queryLlmWikiOnDesktop, validateLlmWikiWorkspaceOnDesktop } from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
+import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed } from 'vue'
 
 function isAbsolutePath(value: string) {
   return value.startsWith('/') || /^[A-Z]:[\\/]/i.test(value)
 }
+
+function isDesktopWorkspaceAlias(value: string) {
+  return value.trim().toLowerCase() === 'llm-wiki'
+}
+
+const defaultLongTermMemorySettings = {
+  allowPromotion: false,
+  enabled: true,
+  indexPath: 'index.md',
+  manualReviewRequired: true,
+  overviewPath: 'wiki/overview.md',
+  personaReviewRequired: true,
+  queryMode: 'hybrid',
+  workspacePath: 'llm-wiki',
+} as const
 
 interface LlmWikiRuntimeDebugEntry {
   at: string
@@ -26,6 +42,10 @@ interface LlmWikiQueryResultItem {
   excerpt: string
 }
 
+function isLegacyBrokenDebugEntry(value: unknown): value is '[object Object]' {
+  return value === '[object Object]'
+}
+
 function buildLlmWikiRecallPrompt(items: LlmWikiQueryResultItem[]) {
   if (items.length === 0) {
     return ''
@@ -40,20 +60,44 @@ function buildLlmWikiRecallPrompt(items: LlmWikiQueryResultItem[]) {
 }
 
 export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
-  const enabled = useLocalStorageManualReset<boolean>('settings/memory/long-term/enabled', false)
+  const enabled = useLocalStorageManualReset<boolean>('settings/memory/long-term/enabled', defaultLongTermMemorySettings.enabled)
   const backendId = useLocalStorageManualReset<string>('settings/memory/long-term/backend-id', 'llm-wiki')
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/long-term/validation-status', 'idle')
   const lastValidation = useLocalStorageManualReset<string>('settings/memory/long-term/last-validation', '')
 
-  const workspacePath = useLocalStorageManualReset<string>('settings/memory/long-term/workspace-path', '')
-  const indexPath = useLocalStorageManualReset<string>('settings/memory/long-term/index-path', 'index.md')
-  const overviewPath = useLocalStorageManualReset<string>('settings/memory/long-term/overview-path', 'wiki/overview.md')
-  const queryMode = useLocalStorageManualReset<string>('settings/memory/long-term/query-mode', 'digest')
-  const allowPromotion = useLocalStorageManualReset<boolean>('settings/memory/long-term/allow-promotion', false)
-  const manualReviewRequired = useLocalStorageManualReset<boolean>('settings/memory/long-term/manual-review-required', true)
-  const personaReviewRequired = useLocalStorageManualReset<boolean>('settings/memory/long-term/persona-review-required', true)
+  const workspacePath = useLocalStorageManualReset<string>('settings/memory/long-term/workspace-path', defaultLongTermMemorySettings.workspacePath)
+  const indexPath = useLocalStorageManualReset<string>('settings/memory/long-term/index-path', defaultLongTermMemorySettings.indexPath)
+  const overviewPath = useLocalStorageManualReset<string>('settings/memory/long-term/overview-path', defaultLongTermMemorySettings.overviewPath)
+  const queryMode = useLocalStorageManualReset<string>('settings/memory/long-term/query-mode', defaultLongTermMemorySettings.queryMode)
+  const allowPromotion = useLocalStorageManualReset<boolean>('settings/memory/long-term/allow-promotion', defaultLongTermMemorySettings.allowPromotion)
+  const manualReviewRequired = useLocalStorageManualReset<boolean>('settings/memory/long-term/manual-review-required', defaultLongTermMemorySettings.manualReviewRequired)
+  const personaReviewRequired = useLocalStorageManualReset<boolean>('settings/memory/long-term/persona-review-required', defaultLongTermMemorySettings.personaReviewRequired)
   const notes = useLocalStorageManualReset<string>('settings/memory/long-term/notes', '')
-  const lastRecallDebug = useLocalStorageManualReset<LlmWikiRuntimeDebugEntry | null>('settings/memory/long-term/debug/last-recall', null)
+  const lastRecallDebug = useLocalStorageManualReset<LlmWikiRuntimeDebugEntry | null>('settings/memory/long-term/debug/last-recall', null, {
+    serializer: StorageSerializers.object,
+  })
+
+  if (isLegacyBrokenDebugEntry(lastRecallDebug.value)) {
+    lastRecallDebug.value = null
+  }
+
+  if (!workspacePath.value.trim()) {
+    workspacePath.value = defaultLongTermMemorySettings.workspacePath
+  }
+
+  if (!indexPath.value.trim()) {
+    indexPath.value = defaultLongTermMemorySettings.indexPath
+  }
+
+  if (!overviewPath.value.trim()) {
+    overviewPath.value = defaultLongTermMemorySettings.overviewPath
+  }
+
+  if (!queryMode.value.trim()) {
+    queryMode.value = defaultLongTermMemorySettings.queryMode
+  }
+
+  let defaultWorkspacePromise: Promise<void> | undefined
 
   const configured = computed(() => {
     if (!enabled.value) {
@@ -76,7 +120,39 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
     lastRecallDebug.value = entry
   }
 
+  async function ensureDefaultWorkspace() {
+    if (!isStageTamagotchi()) {
+      return
+    }
+
+    if (workspacePath.value.trim()) {
+      return
+    }
+
+    if (!defaultWorkspacePromise) {
+      defaultWorkspacePromise = (async () => {
+        try {
+          const result = await ensureDefaultLlmWikiWorkspaceOnDesktop()
+          if (!result) {
+            return
+          }
+
+          workspacePath.value = result.workspacePath
+          indexPath.value = result.indexPath
+          overviewPath.value = result.overviewPath
+        }
+        catch (error) {
+          lastValidation.value = errorMessageFrom(error) ?? 'Failed to initialize AIRI default llm-wiki workspace.'
+        }
+      })()
+    }
+
+    await defaultWorkspacePromise
+  }
+
   async function validateConfiguration() {
+    await ensureDefaultWorkspace()
+
     if (!enabled.value) {
       validationStatus.value = 'idle'
       lastValidation.value = 'Long-term memory is disabled.'
@@ -89,7 +165,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
       return { valid: false, message: lastValidation.value }
     }
 
-    if (!isAbsolutePath(workspacePath.value.trim())) {
+    if (!isAbsolutePath(workspacePath.value.trim()) && (!isStageTamagotchi() || !isDesktopWorkspaceAlias(workspacePath.value.trim()))) {
       validationStatus.value = 'error'
       lastValidation.value = 'Workspace path should be an absolute path so runtime integrations can resolve it reliably.'
       return { valid: false, message: lastValidation.value }
@@ -152,6 +228,8 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
   }
 
   async function queryWiki(query: string) {
+    await ensureDefaultWorkspace()
+
     const trimmedQuery = query.trim()
     if (!trimmedQuery) {
       setRecallDebug({
@@ -241,6 +319,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
     personaReviewRequired.reset()
     notes.reset()
     lastRecallDebug.reset()
+    defaultWorkspacePromise = undefined
     resetValidationState()
   }
 
@@ -260,6 +339,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
     manualReviewRequired,
     personaReviewRequired,
     notes,
+    ensureDefaultWorkspace,
     buildRecallPrompt,
     queryWiki,
     validateConfiguration,

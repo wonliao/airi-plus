@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { FieldCheckbox, FieldInput, FieldTextArea, Select } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
+import { onMounted } from 'vue'
 
 import MemoryValidationAlerts from './memory-validation-alerts.vue'
 
@@ -28,6 +29,10 @@ const queryModeOptions = [
   { label: 'Direct Query', value: 'query', description: 'Read targeted pages directly' },
   { label: 'Hybrid', value: 'hybrid', description: 'Combine direct query with digest' },
 ]
+
+onMounted(() => {
+  void store.ensureDefaultWorkspace()
+})
 </script>
 
 <template>

@@ -150,6 +150,12 @@ export default defineConfig({
     },
 
     server: {
+      // NOTICE: Keep the Electron renderer on a stable, dedicated dev origin so its
+      // localStorage/IndexedDB state does not appear to "disappear" when Vite falls back
+      // between ports like 5173/5174. Stage Web commonly uses 5173, so Electron uses 5174.
+      host: '127.0.0.1',
+      port: 5174,
+      strictPort: true,
       fs: {
         // To mute errors like:
         //   The request id ".../node_modules/@fontsource/sniglet/files/sniglet-latin-400-normal.woff" is outside of Vite serving allow list.

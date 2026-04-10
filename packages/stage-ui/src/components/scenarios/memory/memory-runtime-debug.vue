@@ -19,6 +19,92 @@ const {
   lastRecallDebug: lastLongTermRecallDebug,
 } = storeToRefs(longTermMemoryStore)
 
+interface RuntimeDebugEntry {
+  at: string
+  latestItems: string[]
+  message: string
+  payload: string
+  resultCount?: number
+}
+
+function toDisplayText(value: unknown) {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (value === null || value === undefined) {
+    return ''
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value)
+  }
+
+  try {
+    return JSON.stringify(value, null, 2)
+  }
+  catch {
+    return String(value)
+  }
+}
+
+function toStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value.map(item => toDisplayText(item)).filter(Boolean)
+    : []
+}
+
+function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
+  if (!value) {
+    return null
+  }
+
+  if (typeof value === 'string') {
+    return {
+      at: '',
+      latestItems: [],
+      message: value,
+      payload: '',
+    }
+  }
+
+  if (typeof value !== 'object') {
+    return null
+  }
+
+  const record = value as {
+    at?: unknown
+    latestMemories?: unknown
+    latestSources?: unknown
+    message?: unknown
+    payload?: unknown
+    resultCount?: unknown
+  }
+
+  return {
+    at: toDisplayText(record.at),
+    latestItems: [
+      ...toStringArray(record.latestMemories),
+      ...toStringArray(record.latestSources),
+    ],
+    message: toDisplayText(record.message),
+    payload: toDisplayText(record.payload),
+    resultCount: typeof record.resultCount === 'number'
+      ? record.resultCount
+      : (typeof record.resultCount === 'string' && Number.isFinite(Number(record.resultCount))
+          ? Number(record.resultCount)
+          : undefined),
+  }
+}
+
+function formatRuntimeTimestamp(value: string) {
+  if (!value) {
+    return '—'
+  }
+
+  return value
+}
+
 const shouldShow = computed(() =>
   enabled.value
   || longTermEnabled.value
@@ -31,22 +117,19 @@ const sections = computed(() => [
   {
     key: 'capture',
     title: t('settings.pages.modules.memory-short-term.debug.lastCapture'),
-    entry: lastCaptureDebug.value,
-    latestItems: lastCaptureDebug.value?.latestMemories ?? [],
+    entry: normalizeRuntimeDebugEntry(lastCaptureDebug.value),
     latestItemsLabel: t('settings.pages.modules.memory-short-term.debug.latestMemories'),
   },
   {
     key: 'short-term-recall',
     title: t('settings.pages.modules.memory-short-term.debug.lastRecall'),
-    entry: lastRecallDebug.value,
-    latestItems: lastRecallDebug.value?.latestMemories ?? [],
+    entry: normalizeRuntimeDebugEntry(lastRecallDebug.value),
     latestItemsLabel: t('settings.pages.modules.memory-short-term.debug.latestMemories'),
   },
   {
     key: 'long-term-recall',
     title: t('settings.pages.modules.memory-long-term.debug.lastRecall'),
-    entry: lastLongTermRecallDebug.value,
-    latestItems: lastLongTermRecallDebug.value?.latestSources ?? [],
+    entry: normalizeRuntimeDebugEntry(lastLongTermRecallDebug.value),
     latestItemsLabel: t('settings.pages.modules.memory-long-term.debug.latestSources'),
   },
 ])
@@ -87,19 +170,21 @@ const sections = computed(() => [
         </div>
 
         <div v-if="section.entry" :class="['mt-2 flex flex-col gap-2']">
-          <div>{{ section.entry.message }}</div>
+          <div v-if="section.entry.message">
+            {{ section.entry.message }}
+          </div>
           <div>
             {{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}:
-            {{ section.entry.at }}
+            {{ formatRuntimeTimestamp(section.entry.at) }}
           </div>
           <div v-if="typeof section.entry.resultCount === 'number'">
             {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}:
             {{ section.entry.resultCount }}
           </div>
-          <div v-if="section.latestItems.length" :class="['flex flex-col gap-1']">
+          <div v-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
             <div>{{ section.latestItemsLabel }}:</div>
             <ul :class="['list-disc pl-4']">
-              <li v-for="item in section.latestItems" :key="item">
+              <li v-for="item in section.entry.latestItems" :key="item">
                 {{ item }}
               </li>
             </ul>
