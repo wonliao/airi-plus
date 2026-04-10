@@ -25,6 +25,7 @@ interface RuntimeDebugEntry {
   message: string
   payload: string
   resultCount?: number
+  status?: 'error' | 'skipped' | 'success'
 }
 
 function toDisplayText(value: unknown) {
@@ -79,6 +80,7 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
     message?: unknown
     payload?: unknown
     resultCount?: unknown
+    status?: unknown
   }
 
   return {
@@ -94,6 +96,9 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
       : (typeof record.resultCount === 'string' && Number.isFinite(Number(record.resultCount))
           ? Number(record.resultCount)
           : undefined),
+    status: record.status === 'error' || record.status === 'skipped' || record.status === 'success'
+      ? record.status
+      : undefined,
   }
 }
 
@@ -103,6 +108,14 @@ function formatRuntimeTimestamp(value: string) {
   }
 
   return value
+}
+
+function shouldShowPayload(entry: RuntimeDebugEntry) {
+  return entry.status !== 'skipped' || !!entry.payload
+}
+
+function isSkippedEntry(entry: RuntimeDebugEntry) {
+  return entry.status === 'skipped'
 }
 
 const shouldShow = computed(() =>
@@ -173,23 +186,34 @@ const sections = computed(() => [
           <div v-if="section.entry.message">
             {{ section.entry.message }}
           </div>
-          <div>
-            {{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}:
-            {{ formatRuntimeTimestamp(section.entry.at) }}
-          </div>
-          <div v-if="typeof section.entry.resultCount === 'number'">
-            {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}:
-            {{ section.entry.resultCount }}
-          </div>
-          <div v-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
-            <div>{{ section.latestItemsLabel }}:</div>
-            <ul :class="['list-disc pl-4']">
-              <li v-for="item in section.entry.latestItems" :key="item">
-                {{ item }}
-              </li>
-            </ul>
-          </div>
-          <pre :class="['overflow-x-auto rounded-md bg-neutral-100 p-2 whitespace-pre-wrap break-words dark:bg-neutral-950']">{{ section.entry.payload || $t('settings.pages.modules.memory-short-term.debug.emptyPayload') }}</pre>
+          <template v-if="isSkippedEntry(section.entry)">
+            <div>
+              {{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}:
+              {{ formatRuntimeTimestamp(section.entry.at) }}
+            </div>
+          </template>
+          <template v-else>
+            <div>
+              {{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}:
+              {{ formatRuntimeTimestamp(section.entry.at) }}
+            </div>
+            <div v-if="typeof section.entry.resultCount === 'number'">
+              {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}:
+              {{ section.entry.resultCount }}
+            </div>
+            <div v-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
+              <div>{{ section.latestItemsLabel }}:</div>
+              <ul :class="['list-disc pl-4']">
+                <li v-for="item in section.entry.latestItems" :key="item">
+                  {{ item }}
+                </li>
+              </ul>
+            </div>
+            <pre
+              v-if="shouldShowPayload(section.entry)"
+              :class="['overflow-x-auto rounded-md bg-neutral-100 p-2 whitespace-pre-wrap break-words dark:bg-neutral-950']"
+            >{{ section.entry.payload || $t('settings.pages.modules.memory-short-term.debug.emptyPayload') }}</pre>
+          </template>
         </div>
 
         <div v-else :class="['mt-2 text-neutral-500 dark:text-neutral-400']">

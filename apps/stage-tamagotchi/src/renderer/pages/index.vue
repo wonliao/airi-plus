@@ -50,7 +50,7 @@ const statusIslandRef = ref<InstanceType<typeof StatusIsland>>()
 const widgetStageRef = ref<InstanceType<typeof WidgetStage>>()
 const stageCanvas = toRef(() => widgetStageRef.value?.canvasElement())
 const componentStateStage = ref<'pending' | 'loading' | 'mounted'>('pending')
-const stageMounted = computed(() => componentStateStage.value === 'mounted')
+const stageMounted = computed(() => componentStateStage.value === 'mounted' || stageModelRenderer.value === 'disabled')
 const isLoading = computed(() => !stageMounted.value)
 
 const isIgnoringMouseEvents = ref(false)

@@ -294,6 +294,16 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     lastRecallDebug.value = entry
   }
 
+  async function markRecallSkipped(reason: string, query: string) {
+    setRecallDebug({
+      at: new Date().toISOString(),
+      latestMemories: await fetchLatestMemories(),
+      message: reason,
+      payload: query.trim(),
+      status: 'skipped',
+    })
+  }
+
   async function fetchLatestMemories() {
     if (!runtimeReady.value) {
       return []
@@ -699,6 +709,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     lastRecallDebug,
     buildRecallPrompt,
     captureMessages,
+    markRecallSkipped,
     searchMemories,
     validateConfiguration,
     resetValidationState,

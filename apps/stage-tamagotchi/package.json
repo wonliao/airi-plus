@@ -17,6 +17,7 @@
     "typecheck:web": "vue-tsc --noEmit -p tsconfig.web.json --composite false",
     "typecheck": "pnpm run typecheck:node && pnpm run typecheck:web",
     "app:dev": "pnpm run dev",
+    "app:restart": "tsx scripts/restart-dev.ts",
     "app:build": "pnpm run build",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",

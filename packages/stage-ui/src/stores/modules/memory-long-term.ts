@@ -120,6 +120,15 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
     lastRecallDebug.value = entry
   }
 
+  function markRecallSkipped(reason: string, query: string) {
+    setRecallDebug({
+      at: new Date().toISOString(),
+      message: reason,
+      payload: query.trim(),
+      status: 'skipped',
+    })
+  }
+
   async function ensureDefaultWorkspace() {
     if (!isStageTamagotchi()) {
       return
@@ -350,6 +359,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
     notes,
     ensureDefaultWorkspace,
     buildRecallPrompt,
+    markRecallSkipped,
     queryWiki,
     validateConfiguration,
     resetValidationState,

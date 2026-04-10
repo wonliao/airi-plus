@@ -20,6 +20,7 @@ import { buildContextPromptMessage } from './chat/context-prompt'
 import { createDatetimeContext, createMinecraftContext } from './chat/context-providers'
 import { useChatContextStore } from './chat/context-store'
 import { createChatHooks } from './chat/hooks'
+import { determineMemoryRecallStrategy } from './chat/memory-routing'
 import { useChatSessionStore } from './chat/session-store'
 import { useChatStreamStore } from './chat/stream-store'
 import { useContextObservabilityStore } from './devtools/context-observability'
@@ -343,8 +344,22 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return rawMessage
       })
 
-      const llmWikiRecall = await longTermMemoryStore.buildRecallPrompt(sendingMessage)
-      const mem0Recall = await shortTermMemoryStore.buildRecallPrompt(sendingMessage)
+      const memoryRecallStrategy = determineMemoryRecallStrategy(sendingMessage)
+      const llmWikiRecall = memoryRecallStrategy.shouldRecallLongTerm
+        ? await longTermMemoryStore.buildRecallPrompt(sendingMessage)
+        : null
+      const mem0Recall = memoryRecallStrategy.shouldRecallShortTerm
+        ? await shortTermMemoryStore.buildRecallPrompt(sendingMessage)
+        : null
+
+      if (!memoryRecallStrategy.shouldRecallLongTerm) {
+        longTermMemoryStore.markRecallSkipped('Long-term recall skipped by routing.', sendingMessage)
+      }
+
+      if (!memoryRecallStrategy.shouldRecallShortTerm) {
+        await shortTermMemoryStore.markRecallSkipped('Short-term recall skipped by routing.', sendingMessage)
+      }
+
       const injectedRecallPrompts: Array<{ role: 'user', content: string }> = []
       if (llmWikiRecall) {
         injectedRecallPrompts.push({
@@ -390,6 +405,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
             contexts: contextsSnapshot,
             mem0Recall,
             llmWikiRecall,
+            memoryRecallStrategy,
             promptMessage: contextPromptMessage,
           },
         })
@@ -411,6 +427,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           details: {
             mem0Recall,
             llmWikiRecall,
+            memoryRecallStrategy,
           },
         })
       }
@@ -423,6 +440,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           composedMessage: newMessages,
           mem0Recall,
           llmWikiRecall,
+          memoryRecallStrategy,
         },
       })
 

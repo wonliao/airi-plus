@@ -5,44 +5,65 @@ import process, { env, platform } from 'node:process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import messages from '@proj-airi/i18n/locales'
-
-import { electronApp, optimizer } from '@electron-toolkit/utils'
-import { Format, LogLevel, setGlobalFormat, setGlobalHookPostLog, setGlobalLogLevel, useLogg } from '@guiiai/logg'
+import { electronApp } from '@electron-toolkit/utils'
+import { Format, LogLevel, setGlobalFormat, setGlobalLogLevel, useLogg } from '@guiiai/logg'
 import { initScreenCaptureForMain } from '@proj-airi/electron-screen-capture/main'
 import { app, ipcMain } from 'electron'
-import { noop } from 'es-toolkit'
-import { createLoggLogger, injeca, lifecycle } from 'injeca'
+import { injeca } from 'injeca'
 import { isLinux } from 'std-env'
 
 import icon from '../../resources/icon.png?asset'
 
 import { openDebugger, setupDebugger } from './app/debugger'
 import { nullFileLoggerHandle, setupFileLogger } from './app/file-logger'
-import { createGlobalAppConfig } from './configs/global'
-import { emitAppBeforeQuit, emitAppReady, emitAppWindowAllClosed } from './libs/bootkit/lifecycle'
+import { setupShutdownManager } from './app/shutdown-manager'
+import { setupSingleInstanceLock } from './app/single-instance'
+import { startElectronApp } from './app/startup-manager'
+import { emitAppBeforeQuit, emitAppWindowAllClosed } from './libs/bootkit/lifecycle'
 import { setElectronMainDirname } from './libs/electron/location'
-import { createI18n } from './libs/i18n'
-import { setupServerChannel } from './services/airi/channel-server'
-import { setupMcpStdioManager } from './services/airi/mcp-servers'
-import { setupPluginHost } from './services/airi/plugins'
-import { setupAutoUpdater } from './services/electron/auto-updater'
-import { setupTray } from './tray'
-import { setupAboutWindowReusable } from './windows/about'
-import { setupBeatSync } from './windows/beat-sync'
-import { setupCaptionWindowManager } from './windows/caption'
-import { setupChatWindowReusableFunc } from './windows/chat'
-import { setupDevtoolsWindow } from './windows/devtools'
-import { setupMainWindow } from './windows/main'
-import { setupNoticeWindowManager } from './windows/notice'
-import { setupOnboardingWindowManager } from './windows/onboarding'
-import { setupSettingsWindowReusableFunc } from './windows/settings'
-import { setupWidgetsWindowManager } from './windows/widgets'
 
 // TODO: once we refactored eventa to support window-namespaced contexts,
 // we can remove the setMaxListeners call below since eventa will be able to dispatch and
 // manage events within eventa's context system.
 ipcMain.setMaxListeners(100)
+
+function isBrokenPipeLikeError(error: unknown) {
+  return error instanceof Error && error.message.includes('EIO')
+}
+
+function installSafeConsoleGuards() {
+  for (const method of ['log', 'info', 'warn', 'error'] as const) {
+    const original = console[method].bind(console)
+
+    console[method] = ((...args: unknown[]) => {
+      try {
+        const stream = method === 'error' || method === 'warn' ? process.stderr : process.stdout
+        if (!stream || stream.destroyed || !stream.writable) {
+          return
+        }
+
+        original(...args)
+      }
+      catch (error) {
+        if (!isBrokenPipeLikeError(error)) {
+          throw error
+        }
+      }
+    }) as typeof console[typeof method]
+  }
+}
+
+// NOTICE: When AIRI Electron is launched from a detached dev host, the main-process stdout/stderr
+// can disappear before shutdown completes. `@guiiai/logg` and a few startup helpers still write
+// through `console.*`, which otherwise crashes the Electron main process with `write EIO`.
+// Guard console methods up front so broken pipes are ignored instead of surfacing as uncaught exceptions.
+installSafeConsoleGuards()
+const singleInstance = setupSingleInstanceLock()
+
+if (!singleInstance.hasSingleInstanceLock) {
+  app.quit()
+  process.exit(0)
+}
 
 setElectronMainDirname(dirname(fileURLToPath(import.meta.url)))
 setGlobalFormat(Format.Pretty)
@@ -83,111 +104,13 @@ electronApp.setAppUserModelId('ai.moeru.airi')
 initScreenCaptureForMain()
 
 let fileLogger: FileLoggerHandle = nullFileLoggerHandle
-let skipFileLogging = false
 
 app.whenReady().then(async () => {
-  // Initialize file logger and register the hook
   fileLogger = await setupFileLogger()
-
-  // Register the global hook for file logging
-  setGlobalHookPostLog((_, formatted) => {
-    if (skipFileLogging || fileLogger.logFileFd === null)
-      return
-    void fileLogger.appendLog(formatted)
+  await startElectronApp({
+    fileLogger,
+    openDebugger,
   })
-
-  injeca.setLogger(createLoggLogger(useLogg('injeca').useGlobalConfig()))
-
-  const appConfig = injeca.provide('configs:app', () => createGlobalAppConfig())
-  const electronApp = injeca.provide('host:electron:app', () => app)
-  const autoUpdater = injeca.provide('services:auto-updater', () => setupAutoUpdater())
-
-  const i18n = injeca.provide('libs:i18n', {
-    dependsOn: { appConfig },
-    build: ({ dependsOn }) => createI18n({ messages, locale: dependsOn.appConfig.get()?.language }),
-  })
-
-  const serverChannel = injeca.provide('modules:channel-server', {
-    dependsOn: { app: electronApp, lifecycle },
-    build: async ({ dependsOn }) => setupServerChannel(dependsOn),
-  })
-
-  const mcpStdioManager = injeca.provide('modules:mcp-stdio-manager', {
-    build: async () => setupMcpStdioManager(),
-  })
-
-  const pluginHost = injeca.provide('modules:plugin-host', {
-    dependsOn: { serverChannel },
-    build: () => setupPluginHost(),
-  })
-
-  // BeatSync will create a background window to capture and process audio.
-  const beatSync = injeca.provide('windows:beat-sync', () => setupBeatSync())
-
-  const devtoolsMarkdownStressWindow = injeca.provide('windows:devtools:markdown-stress', () => setupDevtoolsWindow())
-
-  const onboardingWindowManager = injeca.provide('windows:onboarding', {
-    dependsOn: { serverChannel, i18n },
-    build: ({ dependsOn }) => setupOnboardingWindowManager(dependsOn),
-  })
-
-  const noticeWindow = injeca.provide('windows:notice', {
-    dependsOn: { i18n, serverChannel },
-    build: ({ dependsOn }) => setupNoticeWindowManager(dependsOn),
-  })
-
-  const widgetsManager = injeca.provide('windows:widgets', {
-    dependsOn: { serverChannel, i18n },
-    build: ({ dependsOn }) => setupWidgetsWindowManager(dependsOn),
-  })
-
-  const aboutWindow = injeca.provide('windows:about', {
-    dependsOn: { autoUpdater, i18n, serverChannel },
-    build: ({ dependsOn }) => setupAboutWindowReusable(dependsOn),
-  })
-
-  const chatWindow = injeca.provide('windows:chat', {
-    dependsOn: { widgetsManager, serverChannel, mcpStdioManager, i18n },
-    build: ({ dependsOn }) => setupChatWindowReusableFunc(dependsOn),
-  })
-
-  const settingsWindow = injeca.provide('windows:settings', {
-    dependsOn: { widgetsManager, beatSync, autoUpdater, devtoolsMarkdownStressWindow, serverChannel, mcpStdioManager, i18n },
-    build: async ({ dependsOn }) => setupSettingsWindowReusableFunc(dependsOn),
-  })
-
-  const mainWindow = injeca.provide('windows:main', {
-    dependsOn: { settingsWindow, chatWindow, widgetsManager, noticeWindow, beatSync, autoUpdater, serverChannel, mcpStdioManager, i18n, onboardingWindowManager },
-    build: async ({ dependsOn }) => setupMainWindow(dependsOn),
-  })
-
-  const captionWindow = injeca.provide('windows:caption', {
-    dependsOn: { mainWindow, serverChannel, i18n },
-    build: async ({ dependsOn }) => setupCaptionWindowManager(dependsOn),
-  })
-
-  const tray = injeca.provide('app:tray', {
-    dependsOn: { mainWindow, settingsWindow, captionWindow, widgetsWindow: widgetsManager, serverChannel, beatSyncBgWindow: beatSync, aboutWindow, i18n },
-    build: async ({ dependsOn }) => setupTray(dependsOn),
-  })
-
-  injeca.invoke({
-    dependsOn: { mainWindow, tray, serverChannel, pluginHost, mcpStdioManager, onboardingWindow: onboardingWindowManager },
-    callback: noop,
-  })
-
-  injeca.start().catch(err => console.error(err))
-
-  // Lifecycle
-  emitAppReady()
-
-  // Extra
-  openDebugger()
-
-  // Default open or close DevTools by F12 in development
-  // and ignore CommandOrControl + R in production.
-  // see https://github.com/alex8088/electron-toolkit/tree/master/packages/utils
-  app.on('browser-window-created', (_, window) => optimizer.watchWindowShortcuts(window))
 }).catch((err) => {
   log.withError(err).error('Error during app initialization')
 })
@@ -203,51 +126,12 @@ app.on('window-all-closed', () => {
   }
 })
 
-let appExiting = false
-
-// Clean up server and intervals when app quits
-async function handleAppExit() {
-  if (appExiting)
-    return
-
-  appExiting = true
-
-  let exitedNormally = true
-
-  /**
-   * Safely execute fn and log any errors that occur, marking the exit as abnormal
-   * if an error is caught.
-   *
-   * @param operation - A verb phrase describing the operation.
-   * @param fn - Any function to execute. It can be either sync or async.
-   * @returns A promise that resolves when the operation is complete.
-   */
-  async function logIfError(operation: string, fn: () => unknown): Promise<void> {
-    try {
-      await fn()
-    }
-    catch (error) {
-      exitedNormally = false
-      log.withError(error).error(`[app-exit] Failed to ${operation}:`)
-    }
-  }
-
-  await Promise.all([
-    logIfError('execute onAppBeforeQuit hooks', () => emitAppBeforeQuit()),
-    logIfError('stop injeca', () => injeca.stop()),
-  ])
-
-  // Prevent the global log hook from trying to write to the file after close() is called,
-  // which would cause a recursive failure if close() itself throws.
-  skipFileLogging = true
-  await logIfError('flush file logs', () => fileLogger.close()) // Ensure all logs are flushed
-
-  app.exit(exitedNormally ? 0 : 1)
-}
-
-process.on('SIGINT', () => handleAppExit())
-
-app.on('before-quit', (event) => {
-  event.preventDefault()
-  handleAppExit()
+setupShutdownManager({
+  app,
+  fileLogger: () => fileLogger,
+  emitAppBeforeQuit,
+  stopInjeca: () => injeca.stop(),
+  logError: (message, error) => {
+    log.withError(error).error(message)
+  },
 })
