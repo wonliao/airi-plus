@@ -1,4 +1,4 @@
-export type MemoryRecallRoute = 'personal-memory' | 'knowledge' | 'hybrid'
+export type MemoryRecallRoute = 'character-identity' | 'personal-memory' | 'knowledge' | 'hybrid'
 
 export interface MemoryRecallStrategy {
   route: MemoryRecallRoute
@@ -41,6 +41,17 @@ const personalMemoryPatterns = [
   /\bdo you remember me\b/u,
 ]
 
+const characterIdentityPatterns = [
+  /^你是誰[？?]?$/u,
+  /^妳是誰[？?]?$/u,
+  /^你叫什麼[？?]?$/u,
+  /^妳叫什麼[？?]?$/u,
+  /^芙莉蓮是誰[？?]?$/u,
+  /^\bwho are you\b[?？]?$/u,
+  /^\bwhat(?:'s| is) your name\b[?？]?$/u,
+  /^\bwho is frieren\b[?？]?$/u,
+]
+
 const knowledgePatterns = [
   /誰是/u,
   /是什麼/u,
@@ -62,8 +73,18 @@ export function determineMemoryRecallStrategy(message: string): MemoryRecallStra
   const trimmedMessage = message.trim()
   const normalizedMessage = trimmedMessage.toLowerCase()
 
+  const matchesCharacterIdentity = characterIdentityPatterns.some(pattern => pattern.test(normalizedMessage))
   const matchesPersonalMemory = personalMemoryPatterns.some(pattern => pattern.test(normalizedMessage))
   const matchesKnowledge = knowledgePatterns.some(pattern => pattern.test(normalizedMessage))
+
+  if (matchesCharacterIdentity) {
+    return {
+      route: 'character-identity',
+      shouldRecallShortTerm: false,
+      shouldRecallLongTerm: false,
+      reason: 'Message asks who the active character is, so the role card should answer directly.',
+    }
+  }
 
   if (matchesPersonalMemory) {
     return {
