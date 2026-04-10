@@ -205,6 +205,174 @@ describe('short-term memory desktop runtime', () => {
     }
   })
 
+  it('forgets matching memories when the user explicitly asks to forget them', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-forget-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我最喜歡的顏色是湖水綠。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請忘記，我最喜歡的顏色是湖水綠。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      expect(forgetCapture.ok).toBe(true)
+      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('湖水綠'))).toBe(true)
+
+      const search = await __memoryValidationTestUtils.searchShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        query: '我最喜歡的顏色是什麼？',
+        topK: 5,
+        searchThreshold: 0.6,
+      })
+
+      expect(search.ok).toBe(true)
+      expect(search.items).toHaveLength(0)
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('forgets category-based color memories when the user asks to forget the color preference in Chinese', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-forget-color-category-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: 'I like blue' },
+        ],
+      })
+
+      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請忘記，我喜歡的顏色。' },
+        ],
+      })
+
+      expect(forgetCapture.ok).toBe(true)
+      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('likes blue'))).toBe(true)
+      expect(forgetCapture.latestMemories).toEqual([])
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('deletes an llm-assisted internal delete candidate without re-parsing it', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-internal-delete-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: 'I like blue' },
+        ],
+      })
+
+      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '__DELETE__:likes blue' },
+        ],
+      })
+
+      expect(forgetCapture.ok).toBe(true)
+      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('likes blue'))).toBe(true)
+      expect(forgetCapture.latestMemories).toEqual([])
+
+      const search = await __memoryValidationTestUtils.searchShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        query: 'my favorite color?',
+        topK: 5,
+        searchThreshold: 0,
+      })
+
+      expect(search.ok).toBe(true)
+      expect(search.items).toHaveLength(0)
+      expect(search.latestMemories).toEqual([])
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('clears all short-term memories for the current user', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-clear-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我叫做Ben。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我最喜歡的顏色是湖水綠。' },
+          { role: 'assistant', content: '好的。' },
+        ],
+      })
+
+      const beforeClear = await __memoryValidationTestUtils.listShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        limit: 10,
+      })
+
+      expect(beforeClear.items.length).toBeGreaterThan(0)
+
+      const clearResult = await __memoryValidationTestUtils.clearShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+      })
+
+      expect(clearResult.ok).toBe(true)
+      expect(clearResult.deletedCount).toBeGreaterThan(0)
+      expect(clearResult.latestMemories).toEqual([])
+
+      const afterClear = await __memoryValidationTestUtils.listShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        limit: 10,
+      })
+
+      expect(afterClear.ok).toBe(true)
+      expect(afterClear.items).toHaveLength(0)
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
   it('resolves the mem0 alias to the AIRI-managed short-term store path', async () => {
     const validation = await __memoryValidationTestUtils.validateShortTermMemory({
       mode: 'open-source',
@@ -301,6 +469,35 @@ describe('short-term memory desktop runtime', () => {
       const idolMemories = memories.items.filter(item => item.memory.includes('最喜歡的偶像是'))
       expect(idolMemories).toHaveLength(1)
       expect(idolMemories[0]?.memory).toContain('NewJeans')
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('recalls a stored English color preference from a Chinese question after reopening the conversation', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-cross-lingual-color-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+    const baseUrl = join(appDataRoot, 'mem0')
+
+    try {
+      await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: 'I like deep blue' },
+        ],
+      })
+
+      const search = await __memoryValidationTestUtils.searchShortTermMemory({
+        baseUrl,
+        userId: 'ben',
+        query: '我最喜歡的顏色是什麼？',
+        topK: 5,
+        searchThreshold: 0.6,
+      })
+
+      expect(search.ok).toBe(true)
+      expect(search.items[0]?.memory).toContain('likes deep blue')
     }
     finally {
       await rm(appDataRoot, { force: true, recursive: true })

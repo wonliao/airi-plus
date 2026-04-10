@@ -1,4 +1,5 @@
 export interface ShortTermMemoryExtractionCandidate {
+  action?: 'forget' | 'remember'
   category: string
   confidence: number
   fact: string
@@ -8,7 +9,7 @@ export interface ShortTermMemoryExtractionCandidate {
 
 export interface ShortTermMemoryMemoryOperation {
   candidate: ShortTermMemoryExtractionCandidate
-  kind: 'add' | 'none'
+  kind: 'add' | 'delete' | 'none'
   matchedMemory?: string
 }
 
@@ -31,6 +32,14 @@ export function reconcileShortTermMemoryCandidates(
   return candidates.map<ShortTermMemoryMemoryOperation>((candidate) => {
     const normalizedFact = normalizeMemoryFact(candidate.fact)
     const matchedMemory = normalizedExistingMemories.get(normalizedFact)
+
+    if (candidate.action === 'forget') {
+      return {
+        candidate,
+        kind: matchedMemory ? 'delete' : 'none',
+        matchedMemory,
+      }
+    }
 
     if (matchedMemory) {
       return {

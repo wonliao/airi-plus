@@ -558,6 +558,13 @@ pages:
         example1: 例如：请记住，我最喜欢的水果是芒果。
         example2: 例如：记住，我叫 Ben。
         example3: 例如：记住，我偏好精确的设置步骤。
+      actions:
+        clear:
+          title: 清理短期记忆
+          description: 清空当前用户 ID 在 AIRI Electron 内置短期记忆 runtime 里的所有记忆项目。
+          button: 清理短期记忆
+          clearing: 清理中...
+          success: 已清理短期记忆。
       debug:
         title: Runtime 调试
         description: 用这个面板直接确认 AIRI 最近有没有把 capture 发给 mem0，以及 mem0 或 llm-wiki 的 recall 实际查询了什么。
@@ -568,7 +575,16 @@ pages:
         captureMode: Capture 模式
         candidates: 候选记忆
         operations: 操作结果
+        eventLog: 事件记录
+        matchReasons: 命中原因
         latestMemories: 最新记忆
+        category: 类别
+        conflictKey: 冲突键
+        matchedBy: 命中依据
+        score: 分数
+        copyJson: 复制 debug JSON
+        copyJsonDone: 已复制
+        copyJsonFailed: 复制失败
         emptyPayload: 没有 payload
         emptyState: 目前还没有 runtime 调试记录。
     messaging-discord:

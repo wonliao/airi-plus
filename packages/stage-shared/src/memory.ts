@@ -101,10 +101,15 @@ export interface ShortTermMemoryMessageInput {
 }
 
 export interface ShortTermMemoryResultItem {
+  category?: string
+  conflictKey?: string
   createdAt: string
   id: string
   memory: string
+  matchedBy?: string[]
   score?: number
+  sourceText?: string
+  updatedAt?: string
   userId: string
 }
 
@@ -120,6 +125,7 @@ export interface ShortTermMemorySearchResult {
   ok: boolean
   message: string
   items: ShortTermMemoryResultItem[]
+  latestMemoryItems?: ShortTermMemoryResultItem[]
   latestMemories: string[]
 }
 
@@ -130,7 +136,7 @@ export interface ShortTermMemoryCapturePayload {
 }
 
 export interface ShortTermMemoryCaptureResultItem {
-  event: 'add' | 'update'
+  event: 'add' | 'delete' | 'update'
   id: string
   memory: string
   previousMemory?: string
@@ -140,6 +146,7 @@ export interface ShortTermMemoryCaptureResult {
   ok: boolean
   message: string
   items: ShortTermMemoryCaptureResultItem[]
+  latestMemoryItems?: ShortTermMemoryResultItem[]
   latestMemories: string[]
 }
 
@@ -155,6 +162,19 @@ export interface ShortTermMemoryListResult {
   items: ShortTermMemoryResultItem[]
 }
 
+export interface ShortTermMemoryClearPayload {
+  baseUrl: string
+  userId: string
+}
+
+export interface ShortTermMemoryClearResult {
+  ok: boolean
+  message: string
+  deletedCount: number
+  latestMemoryItems?: ShortTermMemoryResultItem[]
+  latestMemories: string[]
+}
+
 export const electronValidateLlmWikiWorkspace = defineInvokeEventa<LlmWikiWorkspaceValidationResult, LlmWikiWorkspaceValidationPayload>('eventa:invoke:electron:memory:llm-wiki:validate-workspace')
 export const electronEnsureDefaultLlmWikiWorkspace = defineInvokeEventa<LlmWikiDefaultWorkspaceResult, void>('eventa:invoke:electron:memory:llm-wiki:ensure-default-workspace')
 export const electronQueryLlmWiki = defineInvokeEventa<LlmWikiQueryResult, LlmWikiQueryPayload>('eventa:invoke:electron:memory:llm-wiki:query')
@@ -162,6 +182,7 @@ export const electronValidateShortTermMemory = defineInvokeEventa<ShortTermMemor
 export const electronSearchShortTermMemory = defineInvokeEventa<ShortTermMemorySearchResult, ShortTermMemorySearchPayload>('eventa:invoke:electron:memory:short-term:search')
 export const electronCaptureShortTermMemory = defineInvokeEventa<ShortTermMemoryCaptureResult, ShortTermMemoryCapturePayload>('eventa:invoke:electron:memory:short-term:capture')
 export const electronListShortTermMemory = defineInvokeEventa<ShortTermMemoryListResult, ShortTermMemoryListPayload>('eventa:invoke:electron:memory:short-term:list')
+export const electronClearShortTermMemory = defineInvokeEventa<ShortTermMemoryClearResult, ShortTermMemoryClearPayload>('eventa:invoke:electron:memory:short-term:clear')
 
 export async function validateLlmWikiWorkspaceOnDesktop(payload: LlmWikiWorkspaceValidationPayload) {
   const rendererWindow = getRendererWindow()
@@ -287,4 +308,22 @@ export async function listShortTermMemoryOnDesktop(payload: ShortTermMemoryListP
   const listMemory = defineInvoke(context, electronListShortTermMemory)
 
   return listMemory(payload)
+}
+
+export async function clearShortTermMemoryOnDesktop(payload: ShortTermMemoryClearPayload) {
+  const rendererWindow = getRendererWindow()
+  if (!rendererWindow) {
+    return undefined
+  }
+
+  const maybeElectronWindow = rendererWindow as Parameters<typeof isElectronWindow>[0]
+  if (!isElectronWindow(maybeElectronWindow)) {
+    return undefined
+  }
+
+  const { createContext } = await import('@moeru/eventa/adapters/electron/renderer')
+  const { context } = createContext(maybeElectronWindow.electron.ipcRenderer)
+  const clearMemory = defineInvoke(context, electronClearShortTermMemory)
+
+  return clearMemory(payload)
 }

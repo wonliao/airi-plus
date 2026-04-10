@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import { useLongTermMemoryStore } from '../../../stores/modules/memory-long-term'
@@ -18,11 +18,32 @@ const {
   enabled: longTermEnabled,
   lastRecallDebug: lastLongTermRecallDebug,
 } = storeToRefs(longTermMemoryStore)
+const copyState = ref<'copied' | 'idle'>('idle')
+const copyError = ref('')
 
 interface RuntimeDebugEntry {
   at: string
   captureMode?: string
   candidates: string[]
+  events: Array<{
+    event: string
+    id: string
+    memory: string
+    previousMemory: string
+  }>
+  matchedItems: Array<{
+    category: string
+    conflictKey: string
+    matchedBy: string[]
+    memory: string
+    score?: number
+  }>
+  latestMemoryItems: Array<{
+    category: string
+    conflictKey: string
+    id: string
+    memory: string
+  }>
   latestItems: string[]
   message: string
   operations: string[]
@@ -58,6 +79,78 @@ function toStringArray(value: unknown) {
     : []
 }
 
+function toRuntimeDebugEvents(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter(item => !!item && typeof item === 'object')
+    .map((item) => {
+      const record = item as Record<string, unknown>
+      return {
+        event: toDisplayText(record.event),
+        id: toDisplayText(record.id),
+        memory: toDisplayText(record.memory),
+        previousMemory: toDisplayText(record.previousMemory),
+      }
+    })
+    .filter(item => item.event)
+}
+
+function formatRuntimeEventLine(event: RuntimeDebugEntry['events'][number]) {
+  const prefix = event.event.toUpperCase()
+  if (event.event === 'update' && event.previousMemory && event.previousMemory !== event.memory) {
+    return `${prefix} · ${event.previousMemory} -> ${event.memory}${event.id ? ` (#${event.id})` : ''}`
+  }
+
+  const content = event.previousMemory || event.memory
+  return `${prefix} · ${content}${event.id ? ` (#${event.id})` : ''}`
+}
+
+function toRuntimeDebugLatestMemoryItems(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter(item => !!item && typeof item === 'object')
+    .map((item) => {
+      const record = item as Record<string, unknown>
+      return {
+        category: toDisplayText(record.category),
+        conflictKey: toDisplayText(record.conflictKey),
+        id: toDisplayText(record.id),
+        memory: toDisplayText(record.memory),
+      }
+    })
+    .filter(item => item.memory)
+}
+
+function toRuntimeDebugMatchedItems(value: unknown) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value
+    .filter(item => !!item && typeof item === 'object')
+    .map((item) => {
+      const record = item as Record<string, unknown>
+      return {
+        category: toDisplayText(record.category),
+        conflictKey: toDisplayText(record.conflictKey),
+        matchedBy: toStringArray(record.matchedBy),
+        memory: toDisplayText(record.memory),
+        score: typeof record.score === 'number'
+          ? record.score
+          : (typeof record.score === 'string' && Number.isFinite(Number(record.score))
+              ? Number(record.score)
+              : undefined),
+      }
+    })
+    .filter(item => item.memory)
+}
+
 function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
   if (!value) {
     return null
@@ -67,6 +160,9 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
     return {
       at: '',
       candidates: [],
+      events: [],
+      matchedItems: [],
+      latestMemoryItems: [],
       latestItems: [],
       message: value,
       operations: [],
@@ -83,8 +179,11 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
     captureMode?: unknown
     candidates?: unknown
     latestMemories?: unknown
+    matchedItems?: unknown
+    latestMemoryItems?: unknown
     latestSources?: unknown
     message?: unknown
+    events?: unknown
     operations?: unknown
     payload?: unknown
     resultCount?: unknown
@@ -95,6 +194,9 @@ function normalizeRuntimeDebugEntry(value: unknown): RuntimeDebugEntry | null {
     at: toDisplayText(record.at),
     captureMode: toDisplayText(record.captureMode),
     candidates: toStringArray(record.candidates),
+    events: toRuntimeDebugEvents(record.events),
+    matchedItems: toRuntimeDebugMatchedItems(record.matchedItems),
+    latestMemoryItems: toRuntimeDebugLatestMemoryItems(record.latestMemoryItems),
     latestItems: [
       ...toStringArray(record.latestMemories),
       ...toStringArray(record.latestSources),
@@ -129,6 +231,10 @@ function isSkippedEntry(entry: RuntimeDebugEntry) {
   return entry.status === 'skipped'
 }
 
+function hasStructuredLatestItems(entry: RuntimeDebugEntry) {
+  return entry.latestMemoryItems.length > 0
+}
+
 const shouldShow = computed(() =>
   enabled.value
   || longTermEnabled.value
@@ -157,6 +263,28 @@ const sections = computed(() => [
     latestItemsLabel: t('settings.pages.modules.memory-long-term.debug.latestSources'),
   },
 ])
+
+const debugSnapshotJson = computed(() => JSON.stringify({
+  capture: sections.value[0]?.entry,
+  generatedAt: new Date().toISOString(),
+  longTermRecall: sections.value[2]?.entry,
+  shortTermRecall: sections.value[1]?.entry,
+}, null, 2))
+
+async function copyDebugSnapshot() {
+  copyError.value = ''
+
+  try {
+    await navigator.clipboard.writeText(debugSnapshotJson.value)
+    copyState.value = 'copied'
+    setTimeout(() => {
+      copyState.value = 'idle'
+    }, 2000)
+  }
+  catch (error) {
+    copyError.value = error instanceof Error ? error.message : String(error)
+  }
+}
 </script>
 
 <template>
@@ -169,15 +297,31 @@ const sections = computed(() => [
   >
     <summary
       :class="[
-        'cursor-pointer list-none select-none font-medium text-neutral-800',
+        'flex items-center justify-between gap-3 cursor-pointer list-none select-none font-medium text-neutral-800',
         'dark:text-neutral-100',
       ]"
     >
-      {{ $t('settings.pages.modules.memory-short-term.debug.title') }}
+      <span>{{ $t('settings.pages.modules.memory-short-term.debug.title') }}</span>
+      <button
+        type="button"
+        :class="[
+          'rounded-md border border-neutral-200/80 bg-white/90 px-2.5 py-1.5 text-[11px] font-medium transition-colors',
+          'hover:border-neutral-300 hover:bg-neutral-50',
+          'dark:border-neutral-700 dark:bg-neutral-900/80 dark:hover:border-neutral-600 dark:hover:bg-neutral-800',
+        ]"
+        @click.prevent.stop="copyDebugSnapshot"
+      >
+        {{ copyState === 'copied'
+          ? $t('settings.pages.modules.memory-short-term.debug.copyJsonDone')
+          : $t('settings.pages.modules.memory-short-term.debug.copyJson') }}
+      </button>
     </summary>
 
     <p :class="['mt-2 text-neutral-500 dark:text-neutral-400']">
       {{ $t('settings.pages.modules.memory-short-term.debug.description') }}
+    </p>
+    <p v-if="copyError" :class="['mt-2 text-[11px] text-red-500 dark:text-red-400']">
+      {{ $t('settings.pages.modules.memory-short-term.debug.copyJsonFailed') }}: {{ copyError }}
     </p>
 
     <div :class="['mt-3 flex flex-col gap-3']">
@@ -232,7 +376,67 @@ const sections = computed(() => [
                 </li>
               </ul>
             </div>
-            <div v-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
+            <div v-if="section.entry.events.length" :class="['flex flex-col gap-1']">
+              <div>{{ $t('settings.pages.modules.memory-short-term.debug.eventLog') }}:</div>
+              <ul :class="['list-disc pl-4 font-mono text-[11px] leading-5']">
+                <li v-for="item in section.entry.events" :key="`${item.event}:${item.id}:${item.memory}:${item.previousMemory}`">
+                  {{ formatRuntimeEventLine(item) }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="section.entry.matchedItems.length" :class="['flex flex-col gap-2']">
+              <div>{{ $t('settings.pages.modules.memory-short-term.debug.matchReasons') }}:</div>
+              <ul :class="['flex flex-col gap-2']">
+                <li
+                  v-for="item in section.entry.matchedItems"
+                  :key="`${item.memory}:${item.conflictKey}:${item.matchedBy.join('|')}`"
+                  :class="[
+                    'rounded-md border border-neutral-200/80 bg-neutral-50/80 p-2',
+                    'dark:border-neutral-800 dark:bg-neutral-950/40',
+                  ]"
+                >
+                  <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+                    {{ item.memory }}
+                  </div>
+                  <div v-if="typeof item.score === 'number'" :class="['mt-1 text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.score') }}: {{ item.score.toFixed(3) }}
+                  </div>
+                  <div :class="['text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.category') }}: {{ item.category || '—' }}
+                  </div>
+                  <div :class="['text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.conflictKey') }}: {{ item.conflictKey || '—' }}
+                  </div>
+                  <div :class="['text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.matchedBy') }}: {{ item.matchedBy.join(', ') || '—' }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div v-if="hasStructuredLatestItems(section.entry)" :class="['flex flex-col gap-2']">
+              <div>{{ section.latestItemsLabel }}:</div>
+              <ul :class="['flex flex-col gap-2']">
+                <li
+                  v-for="item in section.entry.latestMemoryItems"
+                  :key="`${item.id}:${item.memory}:${item.conflictKey}`"
+                  :class="[
+                    'rounded-md border border-neutral-200/80 bg-neutral-50/80 p-2',
+                    'dark:border-neutral-800 dark:bg-neutral-950/40',
+                  ]"
+                >
+                  <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+                    {{ item.memory }}
+                  </div>
+                  <div :class="['mt-1 text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.category') }}: {{ item.category || '—' }}
+                  </div>
+                  <div :class="['text-[11px] text-neutral-500 dark:text-neutral-400']">
+                    {{ $t('settings.pages.modules.memory-short-term.debug.conflictKey') }}: {{ item.conflictKey || '—' }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+            <div v-else-if="section.entry.latestItems.length" :class="['flex flex-col gap-1']">
               <div>{{ section.latestItemsLabel }}:</div>
               <ul :class="['list-disc pl-4']">
                 <li v-for="item in section.entry.latestItems" :key="item">

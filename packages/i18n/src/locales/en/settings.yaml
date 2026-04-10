@@ -588,6 +588,13 @@ pages:
         example1: 'Example: Please remember that my favorite fruit is mango.'
         example2: 'Example: Remember that my name is Ben.'
         example3: 'Example: Remember that I prefer precise setup guides.'
+      actions:
+        clear:
+          title: Clear short-term memory
+          description: Remove every short-term memory item for the current user ID from AIRI Electron's managed short-term memory runtime.
+          button: Clear short-term memory
+          clearing: Clearing...
+          success: Short-term memory cleared.
       debug:
         title: Runtime debug
         description: Use this panel to confirm whether AIRI recently sent capture to mem0 and what mem0 or llm-wiki query was used during recall.
@@ -598,7 +605,16 @@ pages:
         captureMode: Capture mode
         candidates: Candidates
         operations: Operations
+        eventLog: Event log
+        matchReasons: Match reasons
         latestMemories: Latest memories
+        category: Category
+        conflictKey: Conflict key
+        matchedBy: Matched by
+        score: Score
+        copyJson: Copy debug JSON
+        copyJsonDone: Copied
+        copyJsonFailed: Copy failed
         emptyPayload: No payload
         emptyState: No runtime debug entry yet.
     messaging-discord:

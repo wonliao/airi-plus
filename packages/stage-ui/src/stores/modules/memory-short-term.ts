@@ -5,6 +5,7 @@ import type { MemoryValidationStatus } from './memory-shared'
 import { errorMessageFrom } from '@moeru/std'
 import {
   captureShortTermMemoryOnDesktop,
+  clearShortTermMemoryOnDesktop,
   isAbsoluteFilesystemPath,
   isElectronManagedMemoryAlias,
   isElectronManagedRelativePath,
@@ -17,13 +18,14 @@ import {
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 
 import { extractShortTermMemoryCandidatesWithLlm } from '../chat/memory-extraction'
 import { reconcileShortTermMemoryCandidates } from '../chat/memory-reconcile'
 import { useProvidersStore } from '../providers'
 
 const mem0ConnectivityTimeoutMsec = 5_000
+const shortTermMemoryClearTimeoutMsec = 5_000
 
 interface Mem0ProbeCandidate {
   kind: 'health' | 'models' | 'openapi' | 'docs'
@@ -47,6 +49,25 @@ interface Mem0RuntimeDebugEntry {
   at: string
   captureMode?: 'default' | 'llm-assisted'
   candidates?: string[]
+  events?: Array<{
+    event: 'add' | 'delete' | 'update'
+    id?: string
+    memory?: string
+    previousMemory?: string
+  }>
+  matchedItems?: Array<{
+    category?: string
+    conflictKey?: string
+    matchedBy?: string[]
+    memory: string
+    score?: number
+  }>
+  latestMemoryItems?: Array<{
+    category?: string
+    conflictKey?: string
+    id?: string
+    memory: string
+  }>
   latestMemories?: string[]
   message: string
   operations?: string[]
@@ -182,10 +203,14 @@ function formatCaptureOperations(
   fallbackSummary?: string,
 ) {
   const itemOperations = (items ?? [])
-    .filter(item => item.event === 'add' || item.event === 'update')
+    .filter(item => item.event === 'add' || item.event === 'delete' || item.event === 'update')
     .map((item) => {
       if (item.event === 'update' && item.previousMemory && item.previousMemory !== item.memory) {
         return `UPDATE: ${item.previousMemory} -> ${item.memory ?? ''}`
+      }
+
+      if (item.event === 'delete') {
+        return `DELETE: ${item.previousMemory ?? item.memory ?? ''}`
       }
 
       return `${String(item.event).toUpperCase()}: ${item.memory ?? ''}`
@@ -201,14 +226,46 @@ function formatCaptureOperations(
     : undefined
 }
 
-function buildMem0RecallPrompt(results: Mem0SearchResult[]) {
+function toRuntimeDebugEvents(
+  items: Array<{ event?: string, id?: string, memory?: string, previousMemory?: string }> | undefined,
+) {
+  return (items ?? [])
+    .filter(item => item.event === 'add' || item.event === 'delete' || item.event === 'update')
+    .map(item => ({
+      event: item.event as 'add' | 'delete' | 'update',
+      id: item.id,
+      memory: item.memory,
+      previousMemory: item.previousMemory,
+    }))
+}
+
+function looksLikeChineseQuery(query: string) {
+  return /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(query)
+}
+
+function buildMem0RecallPrompt(query: string, results: Mem0SearchResult[]) {
   if (results.length === 0) {
     return ''
   }
 
+  const bestMatch = results[0]?.memory?.trim()
+  const answerLanguageInstruction = looksLikeChineseQuery(query)
+    ? 'Answer in Traditional Chinese.'
+    : 'Answer in the user\'s language.'
+
   return [
     'These are short-term memories recalled from mem0.',
+    `User question: ${query}`,
+    answerLanguageInstruction,
     'When the user asks about personal preferences, facts, or recent details that match these memories, answer from them directly unless the user is explicitly correcting them.',
+    'If one of the recalled memories directly answers the question, do not say you are unsure or that you do not know.',
+    'Prefer the best matching recalled memory over speculation, and answer plainly with that memory.',
+    ...(bestMatch
+      ? [
+          `Best matching memory: ${bestMatch}`,
+          'If the best matching memory answers the question, use it directly in the final answer.',
+        ]
+      : []),
     ...results.map((result, index) => {
       const scoreText = typeof result.score === 'number'
         ? ` (score=${result.score.toFixed(3)})`
@@ -261,6 +318,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const lastRecallDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-recall', null, {
     serializer: StorageSerializers.object,
   })
+  const isClearing = ref(false)
 
   if (isLegacyBrokenDebugEntry(lastCaptureDebug.value)) {
     lastCaptureDebug.value = null
@@ -377,6 +435,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   async function markRecallSkipped(reason: string, query: string) {
     setRecallDebug({
       at: new Date().toISOString(),
+      latestMemoryItems: await fetchLatestMemoryItems(),
       latestMemories: await fetchLatestMemories(),
       message: reason,
       payload: query.trim(),
@@ -425,6 +484,36 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     catch {
       return []
     }
+  }
+
+  async function fetchLatestMemoryItems() {
+    if (!runtimeReady.value) {
+      return []
+    }
+
+    if (usesDesktopRuntime.value) {
+      try {
+        const response = await listShortTermMemoryOnDesktop({
+          baseUrl: baseUrl.value.trim(),
+          userId: userId.value.trim(),
+          limit: 8,
+        })
+
+        return response?.ok
+          ? response.items.map(item => ({
+              category: item.category,
+              conflictKey: item.conflictKey,
+              id: item.id,
+              memory: item.memory?.trim() ?? '',
+            })).filter(item => item.memory)
+          : []
+      }
+      catch {
+        return []
+      }
+    }
+
+    return []
   }
 
   async function validateConfiguration() {
@@ -569,6 +658,19 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         const finalResults = response?.ok ? response.items.slice(0, topK.value) : []
         setRecallDebug({
           at: new Date().toISOString(),
+          matchedItems: finalResults.map(item => ({
+            category: item.category,
+            conflictKey: item.conflictKey,
+            matchedBy: item.matchedBy,
+            memory: item.memory,
+            score: item.score,
+          })),
+          latestMemoryItems: response?.latestMemoryItems?.map(item => ({
+            category: item.category,
+            conflictKey: item.conflictKey,
+            id: item.id,
+            memory: item.memory,
+          })) ?? [],
           latestMemories: response?.latestMemories ?? [],
           message: response?.message ?? 'Desktop short-term recall is unavailable.',
           payload: trimmedQuery,
@@ -684,8 +786,13 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         })
         const operations = reconcileShortTermMemoryCandidates(extraction.candidates, latestMemories)
         const candidatesToStore = operations
-          .filter(operation => operation.kind === 'add')
-          .map(operation => operation.candidate)
+          .filter(operation => operation.kind === 'add' || operation.kind === 'delete')
+          .map(operation => ({
+            ...operation.candidate,
+            captureText: operation.kind === 'delete'
+              ? `__DELETE__:${operation.candidate.captureText}`
+              : operation.candidate.captureText,
+          }))
 
         extractionSummary = [
           `mode=llm-assisted provider=${providerId} model=${modelId}`,
@@ -702,6 +809,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
             at: new Date().toISOString(),
             captureMode: 'llm-assisted',
             candidates: extraction.candidates.map(candidate => candidate.fact),
+            latestMemoryItems: [],
             latestMemories,
             message: extraction.error
               ? `LLM-assisted capture fell back to built-in capture because extraction failed: ${extraction.error}`
@@ -744,6 +852,13 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         setCaptureDebug({
           at: new Date().toISOString(),
           captureMode: extractionMode.value,
+          events: toRuntimeDebugEvents(response?.items),
+          latestMemoryItems: response?.latestMemoryItems?.map(item => ({
+            category: item.category,
+            conflictKey: item.conflictKey,
+            id: item.id,
+            memory: item.memory,
+          })) ?? [],
           latestMemories: response?.latestMemories ?? [],
           message: response?.message ?? 'Desktop short-term capture is unavailable.',
           operations: formatCaptureOperations(response?.items, extractionSummary),
@@ -790,12 +905,15 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       const payload = await response.json()
       const results = parseMem0CapturePayload(payload)
       const latestMemories = await fetchLatestMemories()
+      const latestMemoryItems = await fetchLatestMemoryItems()
       setCaptureDebug({
         at: new Date().toISOString(),
         captureMode: extractionMode.value,
         candidates: extractionSummary
           ? extractionSummary.split('\n').filter(line => line.startsWith('ADD:') || line.startsWith('NONE:')).map(line => line.replace(/^(ADD|NONE):\s*/u, ''))
           : undefined,
+        events: toRuntimeDebugEvents(results),
+        latestMemoryItems,
         latestMemories,
         message: results.length > 0
           ? `Capture sent ${captureMessagesForRuntime.length} message(s) to mem0 and mem0 returned ${results.length} result item(s).`
@@ -838,7 +956,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     const results = await searchMemories(query)
-    const prompt = buildMem0RecallPrompt(results)
+    const prompt = buildMem0RecallPrompt(query, results)
 
     if (!prompt) {
       return null
@@ -847,6 +965,67 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     return {
       prompt,
       results,
+    }
+  }
+
+  async function clearShortTermMemory() {
+    if (!configured.value) {
+      throw new Error('Short-term memory must be configured before it can be cleared.')
+    }
+
+    if (!usesDesktopRuntime.value) {
+      throw new Error('Clearing short-term memory from this page is currently supported only for AIRI Electron managed runtime.')
+    }
+
+    isClearing.value = true
+
+    try {
+      const response = await Promise.race([
+        clearShortTermMemoryOnDesktop({
+          baseUrl: baseUrl.value.trim(),
+          userId: userId.value.trim(),
+        }),
+        new Promise<undefined>((resolve) => {
+          setTimeout(resolve, shortTermMemoryClearTimeoutMsec, undefined)
+        }),
+      ])
+
+      if (!response?.ok) {
+        throw new Error(response?.message || 'Failed to clear short-term memory. If AIRI Electron was not restarted after this feature was added, please reopen AIRI and try again.')
+      }
+
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        captureMode: extractionMode.value,
+        events: [],
+        latestMemoryItems: response.latestMemoryItems?.map(item => ({
+          category: item.category,
+          conflictKey: item.conflictKey,
+          id: item.id,
+          memory: item.memory,
+        })) ?? [],
+        latestMemories: response.latestMemories,
+        message: response.message,
+        operations: response.deletedCount > 0
+          ? [`CLEAR: deleted ${response.deletedCount} short-term memory item(s)`]
+          : undefined,
+        payload: `Cleared short-term memory for user ${userId.value.trim()}.`,
+        resultCount: response.deletedCount,
+        status: 'success',
+      })
+    }
+    catch (error) {
+      setCaptureDebug({
+        at: new Date().toISOString(),
+        captureMode: extractionMode.value,
+        message: `Clear request failed: ${errorMessageFrom(error) ?? 'Unknown error.'}`,
+        payload: `Clear short-term memory for user ${userId.value.trim()}.`,
+        status: 'error',
+      })
+      throw error
+    }
+    finally {
+      isClearing.value = false
     }
   }
 
@@ -869,6 +1048,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     lastCaptureDebug.reset()
     lastRecallDebug.reset()
     resetValidationState()
+    isClearing.value = false
   }
 
   return {
@@ -891,6 +1071,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     extractionModelOptions,
     embedder,
     vectorStore,
+    isClearing,
     autoRecall,
     autoCapture,
     topK,
@@ -899,6 +1080,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     lastRecallDebug,
     buildRecallPrompt,
     captureMessages,
+    clearShortTermMemory,
     markRecallSkipped,
     ensureExtractionProviderModelsLoaded,
     searchMemories,

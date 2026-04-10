@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { FieldCheckbox, FieldInput, FieldRange, Select } from '@proj-airi/ui'
+import { DoubleCheckButton, FieldCheckbox, FieldInput, FieldRange, Select } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { onMounted, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import MemoryValidationAlerts from './memory-validation-alerts.vue'
 
 import { useShortTermMemoryStore } from '../../../stores/modules/memory-short-term'
 
 const store = useShortTermMemoryStore()
+const { t } = useI18n()
+const clearStatusMessage = ref('')
 const {
   enabled,
   backendId,
@@ -26,6 +29,7 @@ const {
   extractionModelOptions,
   embedder,
   vectorStore,
+  isClearing,
   autoRecall,
   autoCapture,
   topK,
@@ -55,6 +59,18 @@ watch(extractionLlmProvider, async (providerId, previousProviderId) => {
 onMounted(async () => {
   await store.ensureExtractionProviderModelsLoaded()
 })
+
+async function clearManagedShortTermMemory() {
+  clearStatusMessage.value = ''
+
+  try {
+    await store.clearShortTermMemory()
+    clearStatusMessage.value = t('settings.pages.modules.memory-short-term.actions.clear.success')
+  }
+  catch (error) {
+    clearStatusMessage.value = error instanceof Error ? error.message : String(error)
+  }
+}
 </script>
 
 <template>
@@ -262,6 +278,43 @@ onMounted(async () => {
           :validation-message="lastValidation"
           :on-validate="store.validateConfiguration"
         />
+
+        <div :class="['rounded-2xl border p-5 text-sm', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
+          <div :class="['grid grid-cols-1 items-start gap-3']">
+            <div :class="['flex flex-col gap-2']">
+              <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.actions.clear.title') }}
+              </div>
+              <p :class="['text-neutral-600 dark:text-neutral-400']">
+                {{ $t('settings.pages.modules.memory-short-term.actions.clear.description') }}
+              </p>
+              <p
+                v-if="clearStatusMessage"
+                :class="['text-xs', 'text-neutral-500 dark:text-neutral-400']"
+              >
+                {{ clearStatusMessage }}
+              </p>
+            </div>
+
+            <div :class="['flex flex-col items-start gap-2']">
+              <DoubleCheckButton
+                variant="danger"
+                :disabled="!configured || isClearing"
+                @confirm="clearManagedShortTermMemory"
+              >
+                {{ isClearing
+                  ? $t('settings.pages.modules.memory-short-term.actions.clear.clearing')
+                  : $t('settings.pages.modules.memory-short-term.actions.clear.button') }}
+                <template #confirm>
+                  {{ $t('settings.pages.data.confirmations.yes') }}
+                </template>
+                <template #cancel>
+                  {{ $t('settings.pages.card.cancel') }}
+                </template>
+              </DoubleCheckButton>
+            </div>
+          </div>
+        </div>
 
         <div :class="['rounded-2xl border p-5 text-sm', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
           <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">

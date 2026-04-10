@@ -10,6 +10,8 @@ import type {
   ShortTermMemoryCapturePayload,
   ShortTermMemoryCaptureResult,
   ShortTermMemoryCaptureResultItem,
+  ShortTermMemoryClearPayload,
+  ShortTermMemoryClearResult,
   ShortTermMemoryListPayload,
   ShortTermMemoryListResult,
   ShortTermMemoryMessageInput,
@@ -31,6 +33,7 @@ import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
 import {
   electronCaptureShortTermMemory,
+  electronClearShortTermMemory,
   electronEnsureDefaultLlmWikiWorkspace,
   electronListShortTermMemory,
   electronQueryLlmWiki,
@@ -125,6 +128,8 @@ function resolveShortTermStorePathInput(inputPath: string, appDataPath: string, 
 }
 
 interface StoredShortTermMemory {
+  category?: string
+  conflictKey?: string
   createdAt: string
   id: string
   keywords: string[]
@@ -153,7 +158,12 @@ const latinSearchTokenPattern = /[a-z0-9]{2,}/g
 const hanSearchRunPattern = /\p{Script=Han}{2,}/gu
 const rememberPrefixZhPattern = /^(請)?記住[，,:：\s]*/u
 const rememberPrefixEnPattern = /^please remember(?: that)?[,:：\s]*/iu
+const forgetPrefixZhPattern = /^(請)?忘記[，,:：\s]*/u
+const forgetPrefixEnPattern = /^(please )?(forget|remove|delete)(?: that)?[,:：\s]*/iu
 const rememberKeywordPattern = /記住|remember/iu
+const forgetKeywordPattern = /忘記|forget|remove|delete/iu
+const internalDeletePrefixPattern = /^__DELETE__:/u
+const colorWordPattern = /湖水綠|湖水绿|深藍|深蓝|淺藍|浅蓝|藍色|蓝色|[藍蓝]|綠色|绿色|[綠绿]|紅色|红色|[紅红]|黃色|黄色|[黃黄]|紫色|紫|黑色|黑|白色|白|灰色|灰|粉色|粉|橘色|橘|棕色|棕|beige|black|blue|brown|crimson|cyan|gold|gray|green|grey|indigo|lake green|lavender|magenta|maroon|navy|orange|pink|purple|red|silver|teal|turquoise|violet|white|yellow/iu
 const stripFrontmatterPattern = /^---\n[\s\S]*?\n---\n?/u
 const searchTermTokenPattern = /[\p{L}\p{N}][\p{L}\p{N}-]*/gu
 const searchTermHanPattern = /\p{Script=Han}+/gu
@@ -316,7 +326,10 @@ function extractSearchTokens(value: string) {
 
 function createStoredMemory(memory: string, sourceText: string, userId: string): StoredShortTermMemory {
   const now = new Date().toISOString()
+  const identity = parseShortTermMemoryIdentity(memory)
   return {
+    category: identity.category,
+    conflictKey: identity.conflictKey,
     createdAt: now,
     id: randomUUID(),
     keywords: extractSearchTokens(`${memory} ${sourceText}`),
@@ -334,6 +347,13 @@ function sanitizeRememberPrefix(value: string) {
     .trim()
 }
 
+function sanitizeForgetPrefix(value: string) {
+  return value
+    .replace(forgetPrefixZhPattern, '')
+    .replace(forgetPrefixEnPattern, '')
+    .trim()
+}
+
 function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
   const candidates = new Set<string>()
 
@@ -347,10 +367,17 @@ function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
       continue
     }
 
+    if (internalDeletePrefixPattern.test(sourceText)) {
+      candidates.add(sourceText)
+      continue
+    }
+
     const normalizedSource = sanitizeRememberPrefix(sourceText)
+    const normalizedForgetSource = sanitizeForgetPrefix(sourceText)
+    const isForgetRequest = forgetKeywordPattern.test(sourceText)
 
     for (const rule of memoryExtractionRules) {
-      const matched = normalizedSource.match(rule.pattern)
+      const matched = (isForgetRequest ? normalizedForgetSource : normalizedSource).match(rule.pattern)
       if (!matched) {
         continue
       }
@@ -358,7 +385,7 @@ function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
       if (rule.kind === 'favorite-zh') {
         const favoriteParts = matched[1].split('是').map(part => part.trim()).filter(Boolean)
         if (favoriteParts.length >= 2) {
-          candidates.add(`最喜歡的${favoriteParts[0]}是${favoriteParts.slice(1).join('是')}`)
+          candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}最喜歡的${favoriteParts[0]}是${favoriteParts.slice(1).join('是')}`)
         }
       }
       else if (rule.kind === 'favorite-en') {
@@ -368,44 +395,48 @@ function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
           const subject = matched[1].slice(0, favoriteIndex).trim()
           const value = matched[1].slice(favoriteIndex + divider.length).trim()
           if (subject && value) {
-            candidates.add(`favorite ${subject} is ${value}`)
+            candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}favorite ${subject} is ${value}`)
           }
         }
       }
       else if (rule.kind === 'dislike-zh') {
-        candidates.add(`不喜歡${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}不喜歡${matched[1].trim()}`)
       }
       else if (rule.kind === 'dislike-en') {
-        candidates.add(`does not like ${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}does not like ${matched[1].trim()}`)
       }
       else if (rule.kind === 'prefer-zh') {
-        candidates.add(`偏好${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}偏好${matched[1].trim()}`)
       }
       else if (rule.kind === 'prefer-en') {
-        candidates.add(`prefers ${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}prefers ${matched[1].trim()}`)
       }
       else if (rule.kind === 'lives-zh') {
-        candidates.add(`住在${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}住在${matched[1].trim()}`)
       }
       else if (rule.kind === 'lives-en') {
-        candidates.add(`lives in ${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}lives in ${matched[1].trim()}`)
       }
       else if (rule.kind === 'name-zh') {
-        candidates.add(`名字是${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}名字是${matched[1].trim()}`)
       }
       else if (rule.kind === 'name-en') {
-        candidates.add(`name is ${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}name is ${matched[1].trim()}`)
       }
       else if (rule.kind === 'like-zh') {
-        candidates.add(`喜歡${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}喜歡${matched[1].trim()}`)
       }
       else if (rule.kind === 'like-en') {
-        candidates.add(`likes ${matched[1].trim()}`)
+        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}likes ${matched[1].trim()}`)
       }
     }
 
     if (candidates.size === 0 && rememberKeywordPattern.test(sourceText)) {
       candidates.add(normalizedSource)
+    }
+
+    if (candidates.size === 0 && isForgetRequest) {
+      candidates.add(`__DELETE__:${normalizedForgetSource}`)
     }
   }
 
@@ -450,6 +481,42 @@ function parseShortTermMemoryIdentity(memory: string): ParsedShortTermMemoryIden
     }
   }
 
+  const favoriteColorZh = cleaned.match(/^(?:最喜歡的|最喜欢的)?(?:顏色|颜色)是(.+)$/u)
+  if (favoriteColorZh) {
+    return {
+      category: 'preference.color',
+      conflictKey: 'preference.color',
+      normalizedMemory,
+    }
+  }
+
+  const favoriteColorEn = cleaned.match(/^favorite color is (.+)$/iu)
+  if (favoriteColorEn) {
+    return {
+      category: 'preference.color',
+      conflictKey: 'preference.color',
+      normalizedMemory,
+    }
+  }
+
+  const likeZh = cleaned.match(/^喜歡(.+)$/u)
+  if (likeZh && colorWordPattern.test(likeZh[1])) {
+    return {
+      category: 'preference.color',
+      conflictKey: 'preference.color',
+      normalizedMemory,
+    }
+  }
+
+  const likeEn = cleaned.match(/^likes (.+)$/iu)
+  if (likeEn && colorWordPattern.test(likeEn[1])) {
+    return {
+      category: 'preference.color',
+      conflictKey: 'preference.color',
+      normalizedMemory,
+    }
+  }
+
   return {
     category: 'memory.generic',
     conflictKey: normalizedMemory,
@@ -457,13 +524,60 @@ function parseShortTermMemoryIdentity(memory: string): ParsedShortTermMemoryIden
   }
 }
 
-function scoreShortTermMemory(memory: StoredShortTermMemory, query: string) {
+function getStoredShortTermMemoryIdentity(memory: StoredShortTermMemory): ParsedShortTermMemoryIdentity {
+  const parsedIdentity = parseShortTermMemoryIdentity(memory.memory)
+
+  return {
+    category: memory.category?.trim() || parsedIdentity.category,
+    conflictKey: memory.conflictKey?.trim() || parsedIdentity.conflictKey,
+    normalizedMemory: parsedIdentity.normalizedMemory,
+  }
+}
+
+function inferShortTermQueryIdentity(query: string): ParsedShortTermMemoryIdentity | undefined {
+  const cleaned = cleanMemoryText(query)
+  const normalizedMemory = normalizeForSearch(cleaned)
+  if (!normalizedMemory) {
+    return undefined
+  }
+
+  if (/我的名字|我叫什麼|my name/u.test(cleaned)) {
+    return {
+      category: 'identity.name',
+      conflictKey: 'identity.name',
+      normalizedMemory,
+    }
+  }
+
+  if (/住在哪|住在哪裡|住在哪里|where do i live|where am i from/u.test(cleaned)) {
+    return {
+      category: 'profile.location',
+      conflictKey: 'profile.location',
+      normalizedMemory,
+    }
+  }
+
+  if (/喜歡.*顏色|喜欢.*颜色|最喜歡的顏色|最喜欢的颜色|favorite color|what color/u.test(cleaned)) {
+    return {
+      category: 'preference.color',
+      conflictKey: 'preference.color',
+      normalizedMemory,
+    }
+  }
+
+  return parseShortTermMemoryIdentity(cleaned)
+}
+
+function explainShortTermMemoryMatch(memory: StoredShortTermMemory, query: string) {
   const normalizedQuery = normalizeForSearch(query)
   const normalizedMemory = normalizeForSearch(memory.memory)
   const normalizedSource = normalizeForSearch(memory.sourceText)
 
   if (!normalizedQuery || !normalizedMemory) {
-    return 0
+    return {
+      matchedBy: [] as string[],
+      score: 0,
+    }
   }
 
   const queryTokens = extractSearchTokens(normalizedQuery)
@@ -476,20 +590,55 @@ function scoreShortTermMemory(memory: StoredShortTermMemory, query: string) {
   const reverseSubstringBoost = normalizedQuery.includes(normalizedMemory)
     ? 0.25
     : 0
+  const memoryIdentity = getStoredShortTermMemoryIdentity(memory)
+  const queryIdentity = inferShortTermQueryIdentity(query)
+  const matchedBy: string[] = []
 
-  return Math.min(1, overlapScore + substringBoost + reverseSubstringBoost)
+  if (queryIdentity && memoryIdentity.conflictKey === queryIdentity.conflictKey) {
+    matchedBy.push(`conflictKey:${memoryIdentity.conflictKey}`)
+  }
+
+  if (queryIdentity && memoryIdentity.category === queryIdentity.category) {
+    matchedBy.push(`category:${memoryIdentity.category}`)
+  }
+
+  if (overlap.length > 0) {
+    matchedBy.push(`tokenOverlap:${overlap.join(', ')}`)
+  }
+
+  if (substringBoost > 0) {
+    matchedBy.push('memoryContainsQuery')
+  }
+
+  if (reverseSubstringBoost > 0) {
+    matchedBy.push('queryContainsMemory')
+  }
+
+  const identityBoost = matchedBy.some(reason => reason.startsWith('conflictKey:') || reason.startsWith('category:'))
+    ? 0.85
+    : 0
+
+  return {
+    matchedBy,
+    score: Math.min(1, overlapScore + substringBoost + reverseSubstringBoost + identityBoost),
+  }
 }
 
 function sortMemoriesByRecency(memories: StoredShortTermMemory[]) {
   return [...memories].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 
-function toShortTermResultItem(memory: StoredShortTermMemory, score?: number): ShortTermMemoryResultItem {
+function toShortTermResultItem(memory: StoredShortTermMemory, options?: { matchedBy?: string[], score?: number }): ShortTermMemoryResultItem {
   return {
+    category: memory.category,
+    conflictKey: memory.conflictKey,
     createdAt: memory.createdAt,
     id: memory.id,
     memory: memory.memory,
-    score,
+    matchedBy: options?.matchedBy,
+    score: options?.score,
+    sourceText: memory.sourceText,
+    updatedAt: memory.updatedAt,
     userId: memory.userId,
   }
 }
@@ -1086,6 +1235,56 @@ async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise
   }
 }
 
+async function clearShortTermMemory(payload: ShortTermMemoryClearPayload): Promise<ShortTermMemoryClearResult> {
+  const validation = await validateShortTermMemory({
+    mode: 'open-source',
+    userId: payload.userId,
+    baseUrl: payload.baseUrl,
+    apiKey: '',
+    embedder: 'airi-local',
+    vectorStore: 'local-file',
+    topK: 5,
+    searchThreshold: 0,
+  })
+  if (!validation.valid) {
+    return {
+      ok: false,
+      message: validation.message,
+      deletedCount: 0,
+      latestMemoryItems: [],
+      latestMemories: [],
+    }
+  }
+
+  const state = await readShortTermMemoryState(validation.resolvedStorePath)
+  const trimmedUserId = payload.userId.trim()
+  const deletedCount = state.memories.filter(memory => memory.userId === trimmedUserId).length
+
+  if (deletedCount === 0) {
+    return {
+      ok: true,
+      message: 'Short-term memory is already empty.',
+      deletedCount: 0,
+      latestMemoryItems: [],
+      latestMemories: [],
+    }
+  }
+
+  state.memories = state.memories.filter(memory => memory.userId !== trimmedUserId)
+
+  await writeShortTermMemoryState(validation.resolvedStorePath, {
+    memories: sortMemoriesByRecency(state.memories),
+  })
+
+  return {
+    ok: true,
+    message: `Cleared ${deletedCount} short-term memory item(s).`,
+    deletedCount,
+    latestMemoryItems: [],
+    latestMemories: [],
+  }
+}
+
 async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Promise<ShortTermMemorySearchResult> {
   const validation = await validateShortTermMemory({
     mode: 'open-source',
@@ -1118,17 +1317,18 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
 
   const state = await readShortTermMemoryState(validation.resolvedStorePath)
   const scopedMemories = sortMemoriesByRecency(state.memories.filter(memory => memory.userId === payload.userId.trim()))
-  const latestMemories = scopedMemories.slice(0, 8).map(memory => memory.memory)
+  const latestMemoryItems = scopedMemories.slice(0, 8).map(memory => toShortTermResultItem(memory))
+  const latestMemories = latestMemoryItems.map(memory => memory.memory)
   const scoredItems = scopedMemories
     .map(memory => ({
+      match: explainShortTermMemoryMatch(memory, trimmedQuery),
       memory,
-      score: scoreShortTermMemory(memory, trimmedQuery),
     }))
-    .filter(item => item.score > 0)
-    .sort((left, right) => right.score - left.score)
+    .filter(item => item.match.score > 0)
+    .sort((left, right) => right.match.score - left.match.score)
     .slice(0, Math.max(1, Math.min(payload.topK, 20)))
 
-  const filteredItems = scoredItems.filter(item => item.score >= payload.searchThreshold)
+  const filteredItems = scoredItems.filter(item => item.match.score >= payload.searchThreshold)
   const finalItems = filteredItems.length > 0 ? filteredItems : scoredItems.slice(0, 1)
 
   return {
@@ -1136,7 +1336,11 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
     message: finalItems.length > 0
       ? `Short-term recall matched ${finalItems.length} memory item(s).`
       : 'Short-term recall completed but found no matching memory.',
-    items: finalItems.map(item => toShortTermResultItem(item.memory, item.score)),
+    items: finalItems.map(item => toShortTermResultItem(item.memory, {
+      matchedBy: item.match.matchedBy,
+      score: item.match.score,
+    })),
+    latestMemoryItems,
     latestMemories,
   }
 }
@@ -1172,6 +1376,7 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
       ok: true,
       message: 'Short-term capture found no stable memory candidate in this turn.',
       items: [],
+      latestMemoryItems: latest.items,
       latestMemories: latest.items.map(item => item.memory),
     }
   }
@@ -1181,23 +1386,56 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
   const now = new Date().toISOString()
 
   for (const candidate of candidates) {
-    const identity = parseShortTermMemoryIdentity(candidate)
+    const isDeleteOperation = candidate.startsWith('__DELETE__:')
+    const candidateMemory = isDeleteOperation ? candidate.replace(/^__DELETE__:/u, '').trim() : candidate
+    if (!candidateMemory) {
+      continue
+    }
+
+    if (isDeleteOperation) {
+      const identity = inferShortTermQueryIdentity(candidateMemory) ?? parseShortTermMemoryIdentity(candidateMemory)
+      const existingIndex = state.memories.findIndex((memory) => {
+        if (memory.userId !== payload.userId.trim()) {
+          return false
+        }
+
+        const existingIdentity = getStoredShortTermMemoryIdentity(memory)
+        return existingIdentity.normalizedMemory === identity.normalizedMemory
+          || existingIdentity.conflictKey === identity.conflictKey
+          || existingIdentity.category === identity.category
+      })
+
+      if (existingIndex >= 0) {
+        const [removedMemory] = state.memories.splice(existingIndex, 1)
+        results.push({
+          event: 'delete',
+          id: removedMemory.id,
+          memory: removedMemory.memory,
+          previousMemory: removedMemory.memory,
+        })
+      }
+      continue
+    }
+
+    const identity = parseShortTermMemoryIdentity(candidateMemory)
     const existing = state.memories.find((memory) => {
       if (memory.userId !== payload.userId.trim()) {
         return false
       }
 
-      const existingIdentity = parseShortTermMemoryIdentity(memory.memory)
+      const existingIdentity = getStoredShortTermMemoryIdentity(memory)
       return existingIdentity.conflictKey === identity.conflictKey
     })
 
     if (existing) {
-      const existingIdentity = parseShortTermMemoryIdentity(existing.memory)
+      const existingIdentity = getStoredShortTermMemoryIdentity(existing)
 
       if (existingIdentity.normalizedMemory === identity.normalizedMemory) {
+        existing.category = identity.category
+        existing.conflictKey = identity.conflictKey
         existing.updatedAt = now
-        existing.sourceText = candidate
-        existing.keywords = extractSearchTokens(candidate)
+        existing.sourceText = candidateMemory
+        existing.keywords = extractSearchTokens(candidateMemory)
         results.push({
           event: 'update',
           id: existing.id,
@@ -1208,20 +1446,22 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
       }
 
       const previousMemory = existing.memory
-      existing.memory = candidate
+      existing.category = identity.category
+      existing.conflictKey = identity.conflictKey
+      existing.memory = candidateMemory
       existing.updatedAt = now
-      existing.sourceText = candidate
-      existing.keywords = extractSearchTokens(`${candidate} ${candidate}`)
+      existing.sourceText = candidateMemory
+      existing.keywords = extractSearchTokens(`${candidateMemory} ${candidateMemory}`)
       results.push({
         event: 'update',
         id: existing.id,
-        memory: candidate,
+        memory: candidateMemory,
         previousMemory,
       })
       continue
     }
 
-    const stored = createStoredMemory(candidate, candidate, payload.userId.trim())
+    const stored = createStoredMemory(candidateMemory, candidateMemory, payload.userId.trim())
     state.memories.push(stored)
     results.push({
       event: 'add',
@@ -1234,10 +1474,11 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
     memories: sortMemoriesByRecency(state.memories),
   })
 
-  const latestMemories = sortMemoriesByRecency(state.memories)
+  const latestMemoryItems = sortMemoriesByRecency(state.memories)
     .filter(memory => memory.userId === payload.userId.trim())
     .slice(0, 8)
-    .map(memory => memory.memory)
+    .map(memory => toShortTermResultItem(memory))
+  const latestMemories = latestMemoryItems.map(memory => memory.memory)
 
   return {
     ok: true,
@@ -1245,6 +1486,7 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
       ? `Short-term capture stored ${results.length} memory item(s).`
       : 'Short-term capture completed without storing new memory.',
     items: results,
+    latestMemoryItems,
     latestMemories,
   }
 }
@@ -1285,10 +1527,15 @@ export function createMemoryValidationService(params: { context: ReturnType<type
   defineInvokeHandler(params.context, electronListShortTermMemory, async (payload) => {
     return listShortTermMemory(payload)
   })
+
+  defineInvokeHandler(params.context, electronClearShortTermMemory, async (payload) => {
+    return clearShortTermMemory(payload)
+  })
 }
 
 export const __memoryValidationTestUtils = {
   captureShortTermMemory,
+  clearShortTermMemory,
   ensureDefaultWorkspace,
   ensureDefaultWorkspaceFromPaths,
   validateWorkspaceFromPaths,
