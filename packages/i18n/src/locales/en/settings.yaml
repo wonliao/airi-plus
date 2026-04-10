@@ -512,9 +512,6 @@ pages:
       debug:
         lastRecall: Last llm-wiki recall
         latestSources: Latest sources
-      debug:
-        lastRecall: Last llm-wiki recall
-        latestSources: Latest sources
     memory-short-term:
       description: Short-term memory specific settings and management
       title: Short-Term Memory
