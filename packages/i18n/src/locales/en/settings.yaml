@@ -533,8 +533,8 @@ pages:
           placeholder: your-user-id
         baseUrl:
           label: Base URL
-          description: Base URL of the mem0-compatible service or adapter entrypoint.
-          placeholder: e.g. http://127.0.0.1:8000
+          description: In AIRI Electron, this can be `mem0`, a path relative to AIRI app data, or an external mem0-compatible HTTP endpoint.
+          placeholder: mem0, ./memory/local, or http://127.0.0.1:8000
         apiKey:
           label: API key
           description: Optional platform credential. Required only when mem0 is used in platform mode.
@@ -561,7 +561,7 @@ pages:
           description: Minimum similarity threshold used by future mem0 retrieval flows.
       notes:
         title: First-release scope
-        content: This page establishes the mem0 settings contract and validation state first. Full recall and capture runtime wiring can be added afterwards.
+        content: AIRI Electron now includes a built-in short-term memory runtime. You can keep using an external mem0-compatible endpoint on web or advanced desktop setups.
       captureTips:
         title: How to make mem0 remember
         content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. Clear statements are easier for mem0 to extract than long or vague paragraphs.

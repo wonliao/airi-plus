@@ -7,9 +7,10 @@ function getRendererWindow() {
 }
 
 export type ElectronManagedMemoryPathKind = 'llm-wiki' | 'mem0'
+const windowsAbsolutePathPattern = /^[A-Z]:[\\/]/i
 
 export function isAbsoluteFilesystemPath(value: string) {
-  return value.startsWith('/') || /^[A-Z]:[\\/]/i.test(value)
+  return value.startsWith('/') || windowsAbsolutePathPattern.test(value)
 }
 
 export function isElectronManagedMemoryAlias(value: string, kind: ElectronManagedMemoryPathKind) {
@@ -28,7 +29,7 @@ export function isElectronManagedRelativePath(value: string) {
 
   return trimmed.startsWith('./')
     || trimmed.startsWith('../')
-    || (!trimmed.startsWith('/') && !/^[A-Z]:[\\/]/i.test(trimmed))
+    || (!trimmed.startsWith('/') && !windowsAbsolutePathPattern.test(trimmed))
 }
 
 export interface LlmWikiWorkspaceValidationPayload {
@@ -77,9 +78,89 @@ export interface LlmWikiQueryResult {
   items: LlmWikiQueryResultItem[]
 }
 
+export interface ShortTermMemoryValidationPayload {
+  mode: string
+  userId: string
+  baseUrl: string
+  apiKey: string
+  embedder: string
+  vectorStore: string
+  topK: number
+  searchThreshold: number
+}
+
+export interface ShortTermMemoryValidationResult {
+  valid: boolean
+  message: string
+  resolvedStorePath: string
+}
+
+export interface ShortTermMemoryMessageInput {
+  role: 'assistant' | 'user'
+  content: string
+}
+
+export interface ShortTermMemoryResultItem {
+  createdAt: string
+  id: string
+  memory: string
+  score?: number
+  userId: string
+}
+
+export interface ShortTermMemorySearchPayload {
+  baseUrl: string
+  userId: string
+  query: string
+  topK: number
+  searchThreshold: number
+}
+
+export interface ShortTermMemorySearchResult {
+  ok: boolean
+  message: string
+  items: ShortTermMemoryResultItem[]
+  latestMemories: string[]
+}
+
+export interface ShortTermMemoryCapturePayload {
+  baseUrl: string
+  userId: string
+  messages: ShortTermMemoryMessageInput[]
+}
+
+export interface ShortTermMemoryCaptureResultItem {
+  event: 'add' | 'update'
+  id: string
+  memory: string
+}
+
+export interface ShortTermMemoryCaptureResult {
+  ok: boolean
+  message: string
+  items: ShortTermMemoryCaptureResultItem[]
+  latestMemories: string[]
+}
+
+export interface ShortTermMemoryListPayload {
+  baseUrl: string
+  userId: string
+  limit?: number
+}
+
+export interface ShortTermMemoryListResult {
+  ok: boolean
+  message: string
+  items: ShortTermMemoryResultItem[]
+}
+
 export const electronValidateLlmWikiWorkspace = defineInvokeEventa<LlmWikiWorkspaceValidationResult, LlmWikiWorkspaceValidationPayload>('eventa:invoke:electron:memory:llm-wiki:validate-workspace')
 export const electronEnsureDefaultLlmWikiWorkspace = defineInvokeEventa<LlmWikiDefaultWorkspaceResult, void>('eventa:invoke:electron:memory:llm-wiki:ensure-default-workspace')
 export const electronQueryLlmWiki = defineInvokeEventa<LlmWikiQueryResult, LlmWikiQueryPayload>('eventa:invoke:electron:memory:llm-wiki:query')
+export const electronValidateShortTermMemory = defineInvokeEventa<ShortTermMemoryValidationResult, ShortTermMemoryValidationPayload>('eventa:invoke:electron:memory:short-term:validate')
+export const electronSearchShortTermMemory = defineInvokeEventa<ShortTermMemorySearchResult, ShortTermMemorySearchPayload>('eventa:invoke:electron:memory:short-term:search')
+export const electronCaptureShortTermMemory = defineInvokeEventa<ShortTermMemoryCaptureResult, ShortTermMemoryCapturePayload>('eventa:invoke:electron:memory:short-term:capture')
+export const electronListShortTermMemory = defineInvokeEventa<ShortTermMemoryListResult, ShortTermMemoryListPayload>('eventa:invoke:electron:memory:short-term:list')
 
 export async function validateLlmWikiWorkspaceOnDesktop(payload: LlmWikiWorkspaceValidationPayload) {
   const rendererWindow = getRendererWindow()
@@ -133,4 +214,76 @@ export async function queryLlmWikiOnDesktop(payload: LlmWikiQueryPayload) {
   const queryWiki = defineInvoke(context, electronQueryLlmWiki)
 
   return queryWiki(payload)
+}
+
+export async function validateShortTermMemoryOnDesktop(payload: ShortTermMemoryValidationPayload) {
+  const rendererWindow = getRendererWindow()
+  if (!rendererWindow) {
+    return undefined
+  }
+
+  const maybeElectronWindow = rendererWindow as Parameters<typeof isElectronWindow>[0]
+  if (!isElectronWindow(maybeElectronWindow)) {
+    return undefined
+  }
+
+  const { createContext } = await import('@moeru/eventa/adapters/electron/renderer')
+  const { context } = createContext(maybeElectronWindow.electron.ipcRenderer)
+  const validateMemory = defineInvoke(context, electronValidateShortTermMemory)
+
+  return validateMemory(payload)
+}
+
+export async function searchShortTermMemoryOnDesktop(payload: ShortTermMemorySearchPayload) {
+  const rendererWindow = getRendererWindow()
+  if (!rendererWindow) {
+    return undefined
+  }
+
+  const maybeElectronWindow = rendererWindow as Parameters<typeof isElectronWindow>[0]
+  if (!isElectronWindow(maybeElectronWindow)) {
+    return undefined
+  }
+
+  const { createContext } = await import('@moeru/eventa/adapters/electron/renderer')
+  const { context } = createContext(maybeElectronWindow.electron.ipcRenderer)
+  const searchMemory = defineInvoke(context, electronSearchShortTermMemory)
+
+  return searchMemory(payload)
+}
+
+export async function captureShortTermMemoryOnDesktop(payload: ShortTermMemoryCapturePayload) {
+  const rendererWindow = getRendererWindow()
+  if (!rendererWindow) {
+    return undefined
+  }
+
+  const maybeElectronWindow = rendererWindow as Parameters<typeof isElectronWindow>[0]
+  if (!isElectronWindow(maybeElectronWindow)) {
+    return undefined
+  }
+
+  const { createContext } = await import('@moeru/eventa/adapters/electron/renderer')
+  const { context } = createContext(maybeElectronWindow.electron.ipcRenderer)
+  const captureMemory = defineInvoke(context, electronCaptureShortTermMemory)
+
+  return captureMemory(payload)
+}
+
+export async function listShortTermMemoryOnDesktop(payload: ShortTermMemoryListPayload) {
+  const rendererWindow = getRendererWindow()
+  if (!rendererWindow) {
+    return undefined
+  }
+
+  const maybeElectronWindow = rendererWindow as Parameters<typeof isElectronWindow>[0]
+  if (!isElectronWindow(maybeElectronWindow)) {
+    return undefined
+  }
+
+  const { createContext } = await import('@moeru/eventa/adapters/electron/renderer')
+  const { context } = createContext(maybeElectronWindow.electron.ipcRenderer)
+  const listMemory = defineInvoke(context, electronListShortTermMemory)
+
+  return listMemory(payload)
 }

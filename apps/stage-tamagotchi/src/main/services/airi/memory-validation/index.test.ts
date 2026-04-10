@@ -159,6 +159,71 @@ describe('llm-wiki workspace alias', () => {
   })
 })
 
+describe('short-term memory desktop runtime', () => {
+  it('captures and recalls stable facts in the AIRI-managed store', async () => {
+    const appDataRoot = join(tmpdir(), `airi-short-term-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+
+    try {
+      const validation = await __memoryValidationTestUtils.validateShortTermMemory({
+        mode: 'open-source',
+        userId: 'ben',
+        baseUrl: join(appDataRoot, 'mem0'),
+        apiKey: '',
+        embedder: 'airi-local',
+        vectorStore: 'local-file',
+        topK: 5,
+        searchThreshold: 0.6,
+      })
+
+      expect(validation.valid).toBe(true)
+
+      const capture = await __memoryValidationTestUtils.captureShortTermMemory({
+        baseUrl: join(appDataRoot, 'mem0'),
+        userId: 'ben',
+        messages: [
+          { role: 'user', content: '請記住，我叫做Ben。' },
+          { role: 'assistant', content: '好的，我會記住。' },
+        ],
+      })
+
+      expect(capture.ok).toBe(true)
+      expect(capture.items.some(item => item.memory.includes('名字是Ben'))).toBe(true)
+
+      const search = await __memoryValidationTestUtils.searchShortTermMemory({
+        baseUrl: join(appDataRoot, 'mem0'),
+        userId: 'ben',
+        query: '我的名字是什麼？',
+        topK: 5,
+        searchThreshold: 0.6,
+      })
+
+      expect(search.ok).toBe(true)
+      expect(search.items[0]?.memory).toContain('名字是Ben')
+    }
+    finally {
+      await rm(appDataRoot, { force: true, recursive: true })
+    }
+  })
+
+  it('resolves the mem0 alias to the AIRI-managed short-term store path', async () => {
+    const validation = await __memoryValidationTestUtils.validateShortTermMemory({
+      mode: 'open-source',
+      userId: 'ben',
+      baseUrl: 'mem0',
+      apiKey: '',
+      embedder: 'airi-local',
+      vectorStore: 'local-file',
+      topK: 5,
+      searchThreshold: 0.6,
+    })
+
+    expect(validation.valid).toBe(true)
+    expect(validation.resolvedStorePath).toBe(join(process.cwd(), 'mem0'))
+    // REVIEW: This assertion documents the current Vitest fallback when Electron app.getPath
+    // is unavailable. Real Electron resolves `mem0` against app.getPath('userData')`.
+  })
+})
+
 function appDataRootFromWorkspace(workspacePath: string) {
   return dirname(dirname(workspacePath))
 }

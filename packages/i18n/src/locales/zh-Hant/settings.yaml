@@ -494,8 +494,8 @@ pages:
           placeholder: 例如 ben
         baseUrl:
           label: 基礎 URL
-          description: mem0 相容服務或 adapter 入口的基礎 URL。
-          placeholder: 例如 http://127.0.0.1:8000
+          description: 在 AIRI Electron 中，可填 `mem0`、相對於 AIRI app data 的路徑，或外部 mem0 相容 HTTP 端點。
+          placeholder: 例如 mem0、./memory/local 或 http://127.0.0.1:8000
         apiKey:
           label: API 金鑰
           description: 可選的平台憑證，只有在 mem0 使用 platform 模式時才需要。
@@ -522,7 +522,7 @@ pages:
           description: 未來 mem0 檢索流程使用的最低相似度門檻。
       notes:
         title: 首版範圍
-        content: 此頁面先建立 mem0 的設定契約與驗證狀態；完整的 recall 與 capture runtime 接線可於後續再加入。
+        content: AIRI Electron 現在已內建短期記憶 runtime。若是網頁版或進階桌面配置，仍可改用外部 mem0 相容端點。
       captureTips:
         title: 如何讓 mem0 更容易記住
         content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。比起很長或很模糊的段落，清楚陳述更容易被 mem0 抽取成記憶。

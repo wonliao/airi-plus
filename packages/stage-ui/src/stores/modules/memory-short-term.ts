@@ -1,7 +1,17 @@
 import type { MemoryValidationStatus } from './memory-shared'
 
 import { errorMessageFrom } from '@moeru/std'
-import { isUrl } from '@proj-airi/stage-shared'
+import {
+  captureShortTermMemoryOnDesktop,
+  isAbsoluteFilesystemPath,
+  isElectronManagedMemoryAlias,
+  isElectronManagedRelativePath,
+  isStageTamagotchi,
+  isUrl,
+  listShortTermMemoryOnDesktop,
+  searchShortTermMemoryOnDesktop,
+  validateShortTermMemoryOnDesktop,
+} from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
@@ -175,22 +185,35 @@ function buildMem0RecallPrompt(results: Mem0SearchResult[]) {
   ].join('\n')
 }
 
+const defaultShortTermMemorySettings = {
+  autoCapture: true,
+  autoRecall: true,
+  baseUrl: 'mem0',
+  embedder: 'airi-local',
+  enabled: true,
+  mode: 'open-source',
+  searchThreshold: 0.6,
+  topK: 5,
+  userId: 'local',
+  vectorStore: 'local-file',
+} as const
+
 export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
-  const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', false)
+  const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', defaultShortTermMemorySettings.enabled)
   const backendId = useLocalStorageManualReset<string>('settings/memory/short-term/backend-id', 'mem0')
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/short-term/validation-status', 'idle')
   const lastValidation = useLocalStorageManualReset<string>('settings/memory/short-term/last-validation', '')
 
-  const mode = useLocalStorageManualReset<string>('settings/memory/short-term/mode', 'open-source')
-  const userId = useLocalStorageManualReset<string>('settings/memory/short-term/user-id', '')
-  const baseUrl = useLocalStorageManualReset<string>('settings/memory/short-term/base-url', '')
+  const mode = useLocalStorageManualReset<string>('settings/memory/short-term/mode', defaultShortTermMemorySettings.mode)
+  const userId = useLocalStorageManualReset<string>('settings/memory/short-term/user-id', defaultShortTermMemorySettings.userId)
+  const baseUrl = useLocalStorageManualReset<string>('settings/memory/short-term/base-url', defaultShortTermMemorySettings.baseUrl)
   const apiKey = useLocalStorageManualReset<string>('settings/memory/short-term/api-key', '')
-  const embedder = useLocalStorageManualReset<string>('settings/memory/short-term/embedder', '')
-  const vectorStore = useLocalStorageManualReset<string>('settings/memory/short-term/vector-store', '')
-  const autoRecall = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-recall', true)
-  const autoCapture = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-capture', false)
-  const topK = useLocalStorageManualReset<number>('settings/memory/short-term/top-k', 5)
-  const searchThreshold = useLocalStorageManualReset<number>('settings/memory/short-term/search-threshold', 0.6)
+  const embedder = useLocalStorageManualReset<string>('settings/memory/short-term/embedder', defaultShortTermMemorySettings.embedder)
+  const vectorStore = useLocalStorageManualReset<string>('settings/memory/short-term/vector-store', defaultShortTermMemorySettings.vectorStore)
+  const autoRecall = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-recall', defaultShortTermMemorySettings.autoRecall)
+  const autoCapture = useLocalStorageManualReset<boolean>('settings/memory/short-term/auto-capture', defaultShortTermMemorySettings.autoCapture)
+  const topK = useLocalStorageManualReset<number>('settings/memory/short-term/top-k', defaultShortTermMemorySettings.topK)
+  const searchThreshold = useLocalStorageManualReset<number>('settings/memory/short-term/search-threshold', defaultShortTermMemorySettings.searchThreshold)
   const lastCaptureDebug = useLocalStorageManualReset<Mem0RuntimeDebugEntry | null>('settings/memory/short-term/debug/last-capture', null, {
     serializer: StorageSerializers.object,
   })
@@ -206,12 +229,46 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     lastRecallDebug.value = null
   }
 
+  if (isStageTamagotchi()) {
+    if (!userId.value.trim()) {
+      userId.value = defaultShortTermMemorySettings.userId
+    }
+
+    if (!baseUrl.value.trim()) {
+      baseUrl.value = defaultShortTermMemorySettings.baseUrl
+    }
+
+    if (!embedder.value.trim()) {
+      embedder.value = defaultShortTermMemorySettings.embedder
+    }
+
+    if (!vectorStore.value.trim()) {
+      vectorStore.value = defaultShortTermMemorySettings.vectorStore
+    }
+  }
+
+  const usesDesktopRuntime = computed(() => {
+    if (!isStageTamagotchi()) {
+      return false
+    }
+
+    const trimmedBaseUrl = baseUrl.value.trim()
+    return !trimmedBaseUrl
+      || isElectronManagedMemoryAlias(trimmedBaseUrl, 'mem0')
+      || isElectronManagedRelativePath(trimmedBaseUrl)
+      || isAbsoluteFilesystemPath(trimmedBaseUrl)
+  })
+
   const configured = computed(() => {
     if (!enabled.value) {
       return false
     }
 
-    if (!userId.value.trim() || !baseUrl.value.trim() || !embedder.value.trim() || !vectorStore.value.trim()) {
+    if (!userId.value.trim() || !embedder.value.trim() || !vectorStore.value.trim()) {
+      return false
+    }
+
+    if (!usesDesktopRuntime.value && !baseUrl.value.trim()) {
       return false
     }
 
@@ -240,6 +297,23 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   async function fetchLatestMemories() {
     if (!runtimeReady.value) {
       return []
+    }
+
+    if (usesDesktopRuntime.value) {
+      try {
+        const response = await listShortTermMemoryOnDesktop({
+          baseUrl: baseUrl.value.trim(),
+          userId: userId.value.trim(),
+          limit: 8,
+        })
+
+        return response?.ok
+          ? response.items.map(result => result.memory?.trim() ?? '').filter(Boolean).slice(0, 8)
+          : []
+      }
+      catch {
+        return []
+      }
     }
 
     try {
@@ -276,22 +350,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       return { valid: false, message: lastValidation.value }
     }
 
-    if (!baseUrl.value.trim()) {
+    if (!usesDesktopRuntime.value && !baseUrl.value.trim()) {
       validationStatus.value = 'error'
       lastValidation.value = 'Base URL is required before mem0 can be validated.'
-      return { valid: false, message: lastValidation.value }
-    }
-
-    if (!isUrl(baseUrl.value.trim())) {
-      validationStatus.value = 'error'
-      lastValidation.value = 'Base URL must be an absolute URL, including http:// or https://.'
-      return { valid: false, message: lastValidation.value }
-    }
-
-    const parsedBaseUrl = new URL(baseUrl.value.trim())
-    if (!parsedBaseUrl.protocol.startsWith('http')) {
-      validationStatus.value = 'error'
-      lastValidation.value = 'Base URL must use an HTTP or HTTPS endpoint.'
       return { valid: false, message: lastValidation.value }
     }
 
@@ -331,6 +392,45 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       return { valid: false, message: lastValidation.value }
     }
 
+    if (usesDesktopRuntime.value) {
+      try {
+        const desktopValidation = await validateShortTermMemoryOnDesktop({
+          mode: mode.value,
+          userId: userId.value.trim(),
+          baseUrl: baseUrl.value.trim(),
+          apiKey: apiKey.value.trim(),
+          embedder: embedder.value.trim(),
+          vectorStore: vectorStore.value.trim(),
+          topK: topK.value,
+          searchThreshold: searchThreshold.value,
+        })
+
+        if (desktopValidation) {
+          validationStatus.value = desktopValidation.valid ? 'success' : 'error'
+          lastValidation.value = desktopValidation.message
+          return { valid: desktopValidation.valid, message: desktopValidation.message }
+        }
+      }
+      catch (error) {
+        validationStatus.value = 'error'
+        lastValidation.value = errorMessageFrom(error) ?? 'Desktop short-term memory validation failed.'
+        return { valid: false, message: lastValidation.value }
+      }
+    }
+
+    if (!isUrl(baseUrl.value.trim())) {
+      validationStatus.value = 'error'
+      lastValidation.value = 'Base URL must be an absolute URL, `mem0`, or a path relative to AIRI app data.'
+      return { valid: false, message: lastValidation.value }
+    }
+
+    const parsedBaseUrl = new URL(baseUrl.value.trim())
+    if (!parsedBaseUrl.protocol.startsWith('http')) {
+      validationStatus.value = 'error'
+      lastValidation.value = 'Base URL must use an HTTP or HTTPS endpoint.'
+      return { valid: false, message: lastValidation.value }
+    }
+
     const connectivity = await pingMem0Endpoint(parsedBaseUrl, apiKey.value.trim())
     if (!connectivity.ok) {
       validationStatus.value = 'error'
@@ -367,6 +467,27 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     try {
+      if (usesDesktopRuntime.value) {
+        const response = await searchShortTermMemoryOnDesktop({
+          baseUrl: baseUrl.value.trim(),
+          userId: userId.value.trim(),
+          query: trimmedQuery,
+          topK: topK.value,
+          searchThreshold: searchThreshold.value,
+        })
+
+        const finalResults = response?.ok ? response.items.slice(0, topK.value) : []
+        setRecallDebug({
+          at: new Date().toISOString(),
+          latestMemories: response?.latestMemories ?? [],
+          message: response?.message ?? 'Desktop short-term recall is unavailable.',
+          payload: trimmedQuery,
+          resultCount: finalResults.length,
+          status: response?.ok ? 'success' : 'error',
+        })
+        return finalResults
+      }
+
       const response = await fetch(new URL('search', toDirectoryUrl(new URL(baseUrl.value.trim()))), {
         method: 'POST',
         headers: createMem0Headers(apiKey.value.trim(), { contentType: 'application/json' }),
@@ -456,6 +577,24 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     try {
+      if (usesDesktopRuntime.value) {
+        const response = await captureShortTermMemoryOnDesktop({
+          baseUrl: baseUrl.value.trim(),
+          userId: userId.value.trim(),
+          messages: usableMessages,
+        })
+
+        setCaptureDebug({
+          at: new Date().toISOString(),
+          latestMemories: response?.latestMemories ?? [],
+          message: response?.message ?? 'Desktop short-term capture is unavailable.',
+          payload: usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
+          resultCount: response?.items.length ?? 0,
+          status: response?.ok ? 'success' : 'error',
+        })
+        return response?.ok ?? false
+      }
+
       const response = await fetch(new URL('memories', toDirectoryUrl(new URL(baseUrl.value.trim()))), {
         method: 'POST',
         headers: createMem0Headers(apiKey.value.trim(), { contentType: 'application/json' }),
