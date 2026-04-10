@@ -3,28 +3,51 @@ import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { useLongTermMemoryStore } from '../../../stores/modules/memory-long-term'
 import { useShortTermMemoryStore } from '../../../stores/modules/memory-short-term'
 
 const { t } = useI18n()
-const memoryStore = useShortTermMemoryStore()
+const shortTermMemoryStore = useShortTermMemoryStore()
+const longTermMemoryStore = useLongTermMemoryStore()
 const {
   enabled,
   lastCaptureDebug,
   lastRecallDebug,
-} = storeToRefs(memoryStore)
+} = storeToRefs(shortTermMemoryStore)
+const {
+  enabled: longTermEnabled,
+  lastRecallDebug: lastLongTermRecallDebug,
+} = storeToRefs(longTermMemoryStore)
 
-const shouldShow = computed(() => enabled.value || !!lastCaptureDebug.value || !!lastRecallDebug.value)
+const shouldShow = computed(() =>
+  enabled.value
+  || longTermEnabled.value
+  || !!lastCaptureDebug.value
+  || !!lastRecallDebug.value
+  || !!lastLongTermRecallDebug.value,
+)
 
 const sections = computed(() => [
   {
     key: 'capture',
     title: t('settings.pages.modules.memory-short-term.debug.lastCapture'),
     entry: lastCaptureDebug.value,
+    latestItems: lastCaptureDebug.value?.latestMemories ?? [],
+    latestItemsLabel: t('settings.pages.modules.memory-short-term.debug.latestMemories'),
   },
   {
-    key: 'recall',
+    key: 'short-term-recall',
     title: t('settings.pages.modules.memory-short-term.debug.lastRecall'),
     entry: lastRecallDebug.value,
+    latestItems: lastRecallDebug.value?.latestMemories ?? [],
+    latestItemsLabel: t('settings.pages.modules.memory-short-term.debug.latestMemories'),
+  },
+  {
+    key: 'long-term-recall',
+    title: t('settings.pages.modules.memory-long-term.debug.lastRecall'),
+    entry: lastLongTermRecallDebug.value,
+    latestItems: lastLongTermRecallDebug.value?.latestSources ?? [],
+    latestItemsLabel: t('settings.pages.modules.memory-long-term.debug.latestSources'),
   },
 ])
 </script>
@@ -73,11 +96,11 @@ const sections = computed(() => [
             {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}:
             {{ section.entry.resultCount }}
           </div>
-          <div v-if="section.entry.latestMemories?.length" :class="['flex flex-col gap-1']">
-            <div>{{ $t('settings.pages.modules.memory-short-term.debug.latestMemories') }}:</div>
+          <div v-if="section.latestItems.length" :class="['flex flex-col gap-1']">
+            <div>{{ section.latestItemsLabel }}:</div>
             <ul :class="['list-disc pl-4']">
-              <li v-for="memory in section.entry.latestMemories" :key="memory">
-                {{ memory }}
+              <li v-for="item in section.latestItems" :key="item">
+                {{ item }}
               </li>
             </ul>
           </div>

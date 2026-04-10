@@ -10,6 +10,7 @@ import { isMacOS } from 'std-env'
 
 import { createServerChannelService } from '../../services/airi/channel-server'
 import { createI18nService } from '../../services/airi/i18n'
+import { createMemoryValidationService } from '../../services/airi/memory-validation'
 import { createAppService, createPowerMonitorService, createScreenService, createWindowService } from '../../services/electron'
 
 export function toggleWindowShow(window?: BrowserWindow | null): void {
@@ -104,4 +105,5 @@ export async function setupBaseWindowElectronInvokes(params: {
   await createI18nService({ context: params.context, window: params.window, i18n: params.i18n })
 
   createServerChannelService({ serverChannel: params.serverChannel })
+  createMemoryValidationService({ context: params.context })
 }

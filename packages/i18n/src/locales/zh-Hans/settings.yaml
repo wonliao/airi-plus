@@ -478,7 +478,10 @@ pages:
           placeholder: 在此描述工作区约定、digest 指令或审核规则。
       notes:
         title: 首版范围
-        content: 此页面先定义 llm-wiki 的配置契约与验证状态；完整的 ingest、digest 与 promotion 自动化可以在后续再接入。
+        content: 此页面现在已支持桌面版 llm-wiki 查询 recall，以及配置与验证；完整的 ingest 与 promotion 自动化可以在后续再接入。
+      debug:
+        lastRecall: 最近一次 llm-wiki recall
+        latestSources: 最新来源
     memory-short-term:
       description: 短期记忆专用设置与管理
       title: 短期记忆
@@ -537,7 +540,7 @@ pages:
         example3: 例如：记住，我偏好精确的设置步骤。
       debug:
         title: Runtime 调试
-        description: 用这个面板直接确认 AIRI 最近有没有把 capture 发给 mem0，以及 recall 实际查询了什么。
+        description: 用这个面板直接确认 AIRI 最近有没有把 capture 发给 mem0，以及 mem0 或 llm-wiki 的 recall 实际查询了什么。
         lastCapture: 最近一次 capture
         lastRecall: 最近一次 recall
         timestamp: 时间

@@ -508,7 +508,13 @@ pages:
           placeholder: Describe any workspace conventions, digest commands, or review rules here.
       notes:
         title: First-release scope
-        content: This page defines the llm-wiki configuration contract and validation state first. Full ingest, digest, and promotion automation can be wired later.
+        content: This page now supports desktop llm-wiki query recall alongside configuration and validation. Full ingest and promotion automation can be wired later.
+      debug:
+        lastRecall: Last llm-wiki recall
+        latestSources: Latest sources
+      debug:
+        lastRecall: Last llm-wiki recall
+        latestSources: Latest sources
     memory-short-term:
       description: Short-term memory specific settings and management
       title: Short-Term Memory
@@ -567,7 +573,7 @@ pages:
         example3: 'Example: Remember that I prefer precise setup guides.'
       debug:
         title: Runtime debug
-        description: Use this panel to confirm whether AIRI recently sent a capture request to mem0 and what query was used for recall.
+        description: Use this panel to confirm whether AIRI recently sent capture to mem0 and what mem0 or llm-wiki query was used during recall.
         lastCapture: Last capture
         lastRecall: Last recall
         timestamp: Time

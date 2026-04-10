@@ -25,6 +25,7 @@ import { useChatStreamStore } from './chat/stream-store'
 import { useContextObservabilityStore } from './devtools/context-observability'
 import { useLLM } from './llm'
 import { useConsciousnessStore } from './modules/consciousness'
+import { useLongTermMemoryStore } from './modules/memory-long-term'
 import { useShortTermMemoryStore } from './modules/memory-short-term'
 import { useProvidersStore } from './providers'
 
@@ -79,6 +80,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const contextObservability = useContextObservabilityStore()
   const { activeSessionId } = storeToRefs(chatSession)
   const { streamingMessage } = storeToRefs(chatStream)
+  const longTermMemoryStore = useLongTermMemoryStore()
   const shortTermMemoryStore = useShortTermMemoryStore()
 
   const sending = ref(false)
@@ -341,17 +343,29 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return rawMessage
       })
 
+      const llmWikiRecall = await longTermMemoryStore.buildRecallPrompt(sendingMessage)
       const mem0Recall = await shortTermMemoryStore.buildRecallPrompt(sendingMessage)
+      const injectedRecallPrompts: Array<{ role: 'user', content: string }> = []
+      if (llmWikiRecall) {
+        injectedRecallPrompts.push({
+          role: 'user',
+          content: llmWikiRecall.prompt,
+        })
+      }
       if (mem0Recall) {
+        injectedRecallPrompts.push({
+          role: 'user',
+          content: mem0Recall.prompt,
+        })
+      }
+
+      if (injectedRecallPrompts.length > 0) {
         const system = newMessages.slice(0, 1)
         const afterSystem = newMessages.slice(1, newMessages.length)
 
         newMessages = [
           ...system,
-          {
-            role: 'user',
-            content: mem0Recall.prompt,
-          },
+          ...injectedRecallPrompts,
           ...afterSystem,
         ]
       }
@@ -375,6 +389,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
           details: {
             contexts: contextsSnapshot,
             mem0Recall,
+            llmWikiRecall,
             promptMessage: contextPromptMessage,
           },
         })
@@ -385,21 +400,17 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         sessionId,
         message: sendingMessage,
         contexts: contextsSnapshot,
-        promptMessage: mem0Recall
-          ? {
-              role: 'user',
-              content: mem0Recall.prompt,
-            }
-          : contextPromptMessage,
+        promptMessage: injectedRecallPrompts.at(0) ?? contextPromptMessage,
         composedMessage: newMessages as Message[],
       })
-      if (mem0Recall) {
+      if (mem0Recall || llmWikiRecall) {
         contextObservability.recordLifecycle({
           phase: 'prompt-context-built',
           channel: 'chat',
           sessionId,
           details: {
             mem0Recall,
+            llmWikiRecall,
           },
         })
       }
@@ -411,6 +422,7 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         details: {
           composedMessage: newMessages,
           mem0Recall,
+          llmWikiRecall,
         },
       })
 
