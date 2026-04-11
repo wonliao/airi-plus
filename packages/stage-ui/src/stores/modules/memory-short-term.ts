@@ -253,11 +253,12 @@ const defaultShortTermMemorySettings = {
   runId: '',
   searchThreshold: remoteSearchThresholdDefault,
   topK: 5,
-  userId: 'local',
+  userId: 'user',
 } as const
 
 export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', defaultShortTermMemorySettings.enabled)
+  const enabledDefaultMigrationApplied = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled-default-migration-applied', false)
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/short-term/validation-status', 'idle')
   const lastValidation = useLocalStorageManualReset<string>('settings/memory/short-term/last-validation', '')
 
@@ -284,6 +285,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   if (isLegacyBrokenDebugEntry(lastRecallDebug.value)) {
     lastRecallDebug.value = null
+  }
+
+  if (!enabledDefaultMigrationApplied.value) {
+    enabled.value = true
+    enabledDefaultMigrationApplied.value = true
   }
 
   if (!userId.value.trim()) {
@@ -679,6 +685,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   function resetState() {
     enabled.reset()
+    enabledDefaultMigrationApplied.reset()
     openAIApiKey.reset()
     userId.reset()
     agentId.reset()

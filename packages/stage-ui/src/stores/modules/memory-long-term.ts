@@ -149,6 +149,7 @@ export function buildLlmWikiPromotionCandidates(options: BuildLlmWikiPromotionCa
 
 export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
   const enabled = useLocalStorageManualReset<boolean>('settings/memory/long-term/enabled', defaultLongTermMemorySettings.enabled)
+  const enabledDefaultMigrationApplied = useLocalStorageManualReset<boolean>('settings/memory/long-term/enabled-default-migration-applied', false)
   const backendId = useLocalStorageManualReset<string>('settings/memory/long-term/backend-id', 'llm-wiki')
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/long-term/validation-status', 'idle')
   const lastValidation = useLocalStorageManualReset<string>('settings/memory/long-term/last-validation', '')
@@ -167,6 +168,11 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
 
   if (isLegacyBrokenDebugEntry(lastRecallDebug.value)) {
     lastRecallDebug.value = null
+  }
+
+  if (!enabledDefaultMigrationApplied.value) {
+    enabled.value = true
+    enabledDefaultMigrationApplied.value = true
   }
 
   if (!workspacePath.value.trim()) {
@@ -415,6 +421,7 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
 
   function resetState() {
     enabled.reset()
+    enabledDefaultMigrationApplied.reset()
     backendId.reset()
     workspacePath.reset()
     indexPath.reset()

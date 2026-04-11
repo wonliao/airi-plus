@@ -506,7 +506,7 @@ pages:
         userId:
           label: 用户 ID
           description: Mem0 请求使用的主要记忆范围标识。
-          placeholder: 例如 ben
+          placeholder: 例如 user
         agentId:
           label: Agent ID
           description: 可选的 Mem0 agent 范围，适合同一个 agent 在多次运行之间共享记忆。

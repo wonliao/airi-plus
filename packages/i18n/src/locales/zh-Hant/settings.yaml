@@ -497,7 +497,7 @@ pages:
         userId:
           label: User ID
           description: Mem0 請求使用的主要記憶範圍識別。
-          placeholder: 例如 ben
+          placeholder: 例如 user
         agentId:
           label: Agent ID
           description: 可選的 agent 範圍，適合同一個 agent 在多次執行之間共享記憶。
