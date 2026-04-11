@@ -18,11 +18,12 @@ import {
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { StorageSerializers } from '@vueuse/core'
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import { extractShortTermMemoryCandidatesWithLlm } from '../chat/memory-extraction'
 import { reconcileShortTermMemoryCandidates } from '../chat/memory-reconcile'
 import { useProvidersStore } from '../providers'
+import { useConsciousnessStore } from './consciousness'
 
 const mem0ConnectivityTimeoutMsec = 5_000
 const shortTermMemoryClearTimeoutMsec = 5_000
@@ -81,6 +82,10 @@ interface Mem0CaptureResult {
   id?: string
   memory?: string
 }
+
+const MEMORY_OPERATION_LINE_PATTERN = /^(?:ADD|NONE|UPDATE|DELETE):/u
+const MEMORY_CANDIDATE_PREFIX_PATTERN = /^(?:ADD|NONE):\s*/u
+const CJK_QUERY_PATTERN = /[\u3400-\u9FFF\uF900-\uFAFF]/u
 
 function isLegacyBrokenDebugEntry(value: unknown): value is '[object Object]' {
   return value === '[object Object]'
@@ -222,7 +227,7 @@ function formatCaptureOperations(
   }
 
   return fallbackSummary
-    ? fallbackSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+    ? fallbackSummary.split('\n').filter(line => MEMORY_OPERATION_LINE_PATTERN.test(line))
     : undefined
 }
 
@@ -240,7 +245,7 @@ function toRuntimeDebugEvents(
 }
 
 function looksLikeChineseQuery(query: string) {
-  return /[\u3400-\u9FFF\uF900-\uFAFF]/u.test(query)
+  return CJK_QUERY_PATTERN.test(query)
 }
 
 function buildMem0RecallPrompt(query: string, results: Mem0SearchResult[]) {
@@ -275,6 +280,31 @@ function buildMem0RecallPrompt(query: string, results: Mem0SearchResult[]) {
   ].join('\n')
 }
 
+export function resolveShortTermMemoryBackendMode(options: {
+  baseUrl: string
+  stageTamagotchi: boolean
+}) {
+  const trimmedBaseUrl = options.baseUrl.trim()
+
+  if (isUrl(trimmedBaseUrl)) {
+    return 'remote-mem0' as const
+  }
+
+  if (
+    options.stageTamagotchi
+    && (
+      !trimmedBaseUrl
+      || isElectronManagedMemoryAlias(trimmedBaseUrl, 'mem0')
+      || isElectronManagedRelativePath(trimmedBaseUrl)
+      || isAbsoluteFilesystemPath(trimmedBaseUrl)
+    )
+  ) {
+    return 'desktop-local' as const
+  }
+
+  return 'remote-mem0' as const
+}
+
 const defaultShortTermMemorySettings = {
   autoCapture: true,
   autoRecall: true,
@@ -291,8 +321,21 @@ const defaultShortTermMemorySettings = {
   vectorStore: 'local-file',
 } as const
 
+export function resolveExtractionLlmDefaults(params: {
+  currentProvider: string
+  currentModel: string
+  consciousnessProvider: string
+  consciousnessModel: string
+}) {
+  return {
+    provider: params.currentProvider.trim() || params.consciousnessProvider.trim(),
+    model: params.currentModel.trim() || params.consciousnessModel.trim(),
+  }
+}
+
 export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const providersStore = useProvidersStore()
+  const consciousnessStore = useConsciousnessStore()
 
   const enabled = useLocalStorageManualReset<boolean>('settings/memory/short-term/enabled', defaultShortTermMemorySettings.enabled)
   const backendId = useLocalStorageManualReset<string>('settings/memory/short-term/backend-id', 'mem0')
@@ -345,6 +388,32 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       vectorStore.value = defaultShortTermMemorySettings.vectorStore
     }
   }
+
+  const applyExtractionLlmDefaults = () => {
+    const defaults = resolveExtractionLlmDefaults({
+      currentProvider: extractionLlmProvider.value,
+      currentModel: extractionLlmModel.value,
+      consciousnessProvider: consciousnessStore.activeProvider,
+      consciousnessModel: consciousnessStore.activeModel,
+    })
+
+    if (!extractionLlmProvider.value.trim() && defaults.provider) {
+      extractionLlmProvider.value = defaults.provider
+    }
+
+    if (!extractionLlmModel.value.trim() && defaults.model) {
+      extractionLlmModel.value = defaults.model
+    }
+  }
+
+  applyExtractionLlmDefaults()
+
+  watch(
+    () => [consciousnessStore.activeProvider, consciousnessStore.activeModel],
+    () => {
+      applyExtractionLlmDefaults()
+    },
+  )
 
   const usesDesktopRuntime = computed(() => {
     if (!isStageTamagotchi()) {
@@ -891,7 +960,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
           captureMode: extractionMode.value,
           message: `Capture failed with HTTP ${response.status}.`,
           operations: extractionSummary
-            ? extractionSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+            ? extractionSummary.split('\n').filter(line => MEMORY_OPERATION_LINE_PATTERN.test(line))
             : undefined,
           payload: [
             usableMessages.map(message => `[${message.role}] ${message.content}`).join('\n'),
@@ -910,7 +979,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         at: new Date().toISOString(),
         captureMode: extractionMode.value,
         candidates: extractionSummary
-          ? extractionSummary.split('\n').filter(line => line.startsWith('ADD:') || line.startsWith('NONE:')).map(line => line.replace(/^(ADD|NONE):\s*/u, ''))
+          ? extractionSummary.split('\n').filter(line => line.startsWith('ADD:') || line.startsWith('NONE:')).map(line => line.replace(MEMORY_CANDIDATE_PREFIX_PATTERN, ''))
           : undefined,
         events: toRuntimeDebugEvents(results),
         latestMemoryItems,
@@ -937,7 +1006,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         at: new Date().toISOString(),
         captureMode: extractionMode.value,
         operations: extractionSummary
-          ? extractionSummary.split('\n').filter(line => /^(ADD|NONE|UPDATE|DELETE):/u.test(line))
+          ? extractionSummary.split('\n').filter(line => MEMORY_OPERATION_LINE_PATTERN.test(line))
           : undefined,
         message: `Capture request failed: ${errorMessageFrom(error) ?? 'Unknown error.'}`,
         payload: [

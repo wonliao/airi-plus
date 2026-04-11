@@ -51,7 +51,7 @@ watch(extractionLlmProvider, async (providerId, previousProviderId) => {
 
   await store.ensureExtractionProviderModelsLoaded()
 
-  if (providerId !== previousProviderId) {
+  if (providerId !== previousProviderId && !extractionLlmModel.value.trim()) {
     extractionLlmModel.value = extractionModelOptions.value[0]?.value ?? ''
   }
 }, { immediate: true })

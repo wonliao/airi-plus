@@ -6,6 +6,7 @@ import { errorMessageFrom } from '@moeru/std'
 import { Button, Callout, FieldCheckbox, FieldInput } from '@proj-airi/ui'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 
 import { useProvidersStore } from '../../../../stores/providers'
 import { Alert } from '../../../misc'
@@ -21,6 +22,7 @@ interface Props {
 const props = defineProps<Props>()
 const { t } = useI18n()
 const providersStore = useProvidersStore()
+const router = useRouter()
 
 const apiKey = ref('')
 const baseUrl = ref('')
@@ -58,14 +60,20 @@ watch([apiKey, baseUrl, accountId], () => {
 })
 
 // Computed properties
+const isOpenAISubscriptionProvider = computed(() => props.selectedProvider?.id === 'openai-subscription')
+
 const needsApiKey = computed(() => {
   if (!props.selectedProvider)
+    return false
+  if (props.selectedProvider.requiresCredentials === false || isOpenAISubscriptionProvider.value)
     return false
   return props.selectedProvider.id !== 'ollama' && props.selectedProvider.id !== 'player2'
 })
 
 const needsBaseUrl = computed(() => {
   if (!props.selectedProvider)
+    return false
+  if (isOpenAISubscriptionProvider.value)
     return false
   return props.selectedProvider.id !== 'cloudflare-workers-ai'
 })
@@ -148,6 +156,10 @@ async function handleContinueAnyway() {
   providersStore.forceProviderConfigured(props.selectedProvider.id)
 }
 
+function openOpenAISubscriptionProviderPage() {
+  void router.push('/settings/providers/chat/openai-subscription')
+}
+
 // Placeholder helpers
 function getApiKeyPlaceholder(providerId: string): string {
   const placeholders: Record<string, string> = {
@@ -209,6 +221,22 @@ initializeForm()
         </div>
       </Callout>
       <div class="space-y-4">
+        <Callout v-if="isOpenAISubscriptionProvider" theme="primary">
+          <template #label>
+            {{ t('settings.pages.providers.provider.openai-subscription.sign-in.title') }}
+          </template>
+          <div class="space-y-3">
+            <p>{{ t('settings.pages.providers.provider.openai-subscription.sign-in.description') }}</p>
+            <p class="text-sm text-neutral-600 dark:text-neutral-300">
+              {{ t('settings.pages.providers.provider.openai-subscription.sign-in.experimentalDescription') }}
+            </p>
+            <Button
+              :label="t('settings.pages.providers.provider.openai-subscription.sign-in.action')"
+              @click="openOpenAISubscriptionProviderPage"
+            />
+          </div>
+        </Callout>
+
         <!-- API Key Input -->
         <div v-if="needsApiKey">
           <FieldInput
