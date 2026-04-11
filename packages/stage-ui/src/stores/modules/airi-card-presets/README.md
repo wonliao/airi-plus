@@ -37,7 +37,7 @@ Code:
 
 `llm-wiki` is responsible for **what AIRI knows about the world**, but not **how Frieren should sound** while saying it.
 
-## mem0 / Short-term Memory
+## Short-term Memory
 
 Short-term memory is responsible for **user-specific and recent facts**.
 
@@ -52,6 +52,9 @@ Code:
 - [`memory-short-term.ts`](/Users/ben/AI_Project/airi-plus/packages/stage-ui/src/stores/modules/memory-short-term.ts)
 - [`memory-extraction.ts`](/Users/ben/AI_Project/airi-plus/packages/stage-ui/src/stores/chat/memory-extraction.ts)
 - [`memory-reconcile.ts`](/Users/ben/AI_Project/airi-plus/packages/stage-ui/src/stores/chat/memory-reconcile.ts)
+
+Backend note:
+- `mem0` refers to AIRI's remote short-term memory backend
 
 Short-term memory should **not** define persona voice or answer identity questions on behalf of the active character.
 

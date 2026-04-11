@@ -2,9 +2,115 @@ import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { __memoryValidationTestUtils } from './index'
+
+interface MockRemoteMemoryRecord {
+  agentId?: string
+  createdAt: string
+  memory: string
+  id: string
+  runId?: string
+  userId: string
+}
+
+const mockRemoteMem0Store: MockRemoteMemoryRecord[] = []
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    headers: { 'Content-Type': 'application/json' },
+    status,
+  })
+}
+
+function matchesMemoryScope(memory: MockRemoteMemoryRecord, params: URLSearchParams) {
+  const userId = params.get('user_id') ?? ''
+  const agentId = params.get('agent_id') ?? ''
+  const runId = params.get('run_id') ?? ''
+
+  return memory.userId === userId
+    && (!agentId || memory.agentId === agentId)
+    && (!runId || memory.runId === runId)
+}
+
+beforeEach(() => {
+  mockRemoteMem0Store.splice(0, mockRemoteMem0Store.length)
+  vi.stubGlobal('fetch', vi.fn(async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input.toString())
+
+    if (url.pathname === '/memories' && (init?.method ?? 'GET') === 'GET') {
+      return jsonResponse({
+        results: mockRemoteMem0Store
+          .filter(item => matchesMemoryScope(item, url.searchParams))
+          .slice(0, Number(url.searchParams.get('limit') ?? '100')),
+      })
+    }
+
+    if (url.pathname === '/memories' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        agent_id?: string
+        messages?: Array<{ content: string, role: string }>
+        run_id?: string
+        user_id?: string
+      }
+      const firstMessage = body.messages?.[0]?.content ?? ''
+      const created = {
+        createdAt: new Date().toISOString(),
+        id: `memory-${mockRemoteMem0Store.length + 1}`,
+        memory: firstMessage,
+        agentId: body.agent_id,
+        runId: body.run_id,
+        userId: body.user_id ?? 'unknown',
+      } satisfies MockRemoteMemoryRecord
+      mockRemoteMem0Store.unshift(created)
+      return jsonResponse({
+        results: [{
+          event: 'ADD',
+          id: created.id,
+          memory: created.memory,
+        }],
+      })
+    }
+
+    if (url.pathname === '/memories' && init?.method === 'DELETE') {
+      const kept = mockRemoteMem0Store.filter(item => !matchesMemoryScope(item, url.searchParams))
+      mockRemoteMem0Store.splice(0, mockRemoteMem0Store.length, ...kept)
+      return jsonResponse({ message: 'ok' })
+    }
+
+    if (url.pathname === '/search' && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        agent_id?: string
+        query?: string
+        run_id?: string
+        top_k?: number
+        user_id?: string
+      }
+      const query = body.query?.toLowerCase() ?? ''
+      const results = mockRemoteMem0Store
+        .filter(item => item.userId === body.user_id)
+        .filter(item => !body.agent_id || item.agentId === body.agent_id)
+        .filter(item => !body.run_id || item.runId === body.run_id)
+        .filter(item => item.memory.toLowerCase().includes(query))
+        .slice(0, body.top_k ?? 5)
+        .map(item => ({
+          id: item.id,
+          memory: item.memory,
+          score: 0.96,
+          user_id: item.userId,
+        }))
+
+      return jsonResponse({ results })
+    }
+
+    return jsonResponse({ detail: `Unhandled ${init?.method ?? 'GET'} ${url.pathname}` }, 404)
+  }))
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 async function createWikiFixture() {
   const root = join(tmpdir(), `airi-llm-wiki-${Date.now()}-${Math.random().toString(16).slice(2)}`)
@@ -21,6 +127,35 @@ async function createWikiFixture() {
   await writeFile(join(root, 'wiki', 'sources', '2026-04-08-lernen.md'), '# Lernen Source\n\n素材提到 Lernen 與第一級魔法使考試。\n')
 
   return root
+}
+
+function createRemoteMem0ValidationPayload(overrides: Partial<Parameters<typeof __memoryValidationTestUtils.validateShortTermMemory>[0]> = {}) {
+  return {
+    apiKey: 'test-key',
+    baseUrl: 'http://127.0.0.1:8000',
+    userId: 'ben',
+    topK: 5,
+    searchThreshold: 0.6,
+    ...overrides,
+  }
+}
+
+function createRemoteMem0ScopePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    apiKey: 'test-key',
+    baseUrl: 'http://127.0.0.1:8000',
+    userId: 'ben',
+    ...overrides,
+  }
+}
+
+async function ensureRemoteMem0Validated() {
+  const validation = await __memoryValidationTestUtils.validateShortTermMemory(
+    createRemoteMem0ValidationPayload(),
+  )
+
+  expect(validation.valid).toBe(true)
+  return validation
 }
 
 describe('llm-wiki query ranking', () => {
@@ -160,348 +295,59 @@ describe('llm-wiki workspace alias', () => {
 })
 
 describe('short-term memory desktop runtime', () => {
-  it('captures and recalls stable facts in the AIRI-managed store', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-${Date.now()}-${Math.random().toString(16).slice(2)}`)
+  it('validates the remote Mem0 Docker endpoint', async () => {
+    const validation = await __memoryValidationTestUtils.validateShortTermMemory(
+      createRemoteMem0ValidationPayload(),
+    )
 
-    try {
-      const validation = await __memoryValidationTestUtils.validateShortTermMemory({
-        mode: 'open-source',
-        userId: 'ben',
-        baseUrl: join(appDataRoot, 'mem0'),
-        apiKey: '',
-        embedder: 'airi-local',
-        vectorStore: 'local-file',
-        topK: 5,
-        searchThreshold: 0.6,
-      })
-
-      expect(validation.valid).toBe(true)
-
-      const capture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl: join(appDataRoot, 'mem0'),
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我叫做Ben。' },
-          { role: 'assistant', content: '好的，我會記住。' },
-        ],
-      })
-
-      expect(capture.ok).toBe(true)
-      expect(capture.items.some(item => item.memory.includes('名字是Ben'))).toBe(true)
-
-      const search = await __memoryValidationTestUtils.searchShortTermMemory({
-        baseUrl: join(appDataRoot, 'mem0'),
-        userId: 'ben',
-        query: '我的名字是什麼？',
-        topK: 5,
-        searchThreshold: 0.6,
-      })
-
-      expect(search.ok).toBe(true)
-      expect(search.items[0]?.memory).toContain('名字是Ben')
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
+    expect(validation.valid).toBe(true)
+    expect(validation.validatedBaseUrl).toBe('http://127.0.0.1:8000')
   })
 
-  it('forgets matching memories when the user explicitly asks to forget them', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-forget-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
+  it('captures, lists, searches, and clears memories through the remote API', async () => {
+    await ensureRemoteMem0Validated()
 
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我最喜歡的顏色是湖水綠。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
+    const capture = await __memoryValidationTestUtils.captureShortTermMemory({
+      ...createRemoteMem0ScopePayload(),
+      messages: [
+        { role: 'user', content: 'Remember that my favorite fruit is mango.' },
+      ],
+    })
 
-      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請忘記，我最喜歡的顏色是湖水綠。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
+    expect(capture.ok).toBe(true)
+    expect(capture.items[0]?.memory).toContain('favorite fruit is mango')
 
-      expect(forgetCapture.ok).toBe(true)
-      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('湖水綠'))).toBe(true)
+    const listed = await __memoryValidationTestUtils.listShortTermMemory({
+      ...createRemoteMem0ScopePayload(),
+      limit: 10,
+    })
 
-      const search = await __memoryValidationTestUtils.searchShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        query: '我最喜歡的顏色是什麼？',
-        topK: 5,
-        searchThreshold: 0.6,
-      })
+    expect(listed.ok).toBe(true)
+    expect(listed.items).toHaveLength(1)
 
-      expect(search.ok).toBe(true)
-      expect(search.items).toHaveLength(0)
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('forgets category-based color memories when the user asks to forget the color preference in Chinese', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-forget-color-category-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
-
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: 'I like blue' },
-        ],
-      })
-
-      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請忘記，我喜歡的顏色。' },
-        ],
-      })
-
-      expect(forgetCapture.ok).toBe(true)
-      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('likes blue'))).toBe(true)
-      expect(forgetCapture.latestMemories).toEqual([])
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('deletes an llm-assisted internal delete candidate without re-parsing it', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-internal-delete-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
-
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: 'I like blue' },
-        ],
-      })
-
-      const forgetCapture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '__DELETE__:likes blue' },
-        ],
-      })
-
-      expect(forgetCapture.ok).toBe(true)
-      expect(forgetCapture.items.some(item => item.event === 'delete' && item.memory.includes('likes blue'))).toBe(true)
-      expect(forgetCapture.latestMemories).toEqual([])
-
-      const search = await __memoryValidationTestUtils.searchShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        query: 'my favorite color?',
-        topK: 5,
-        searchThreshold: 0,
-      })
-
-      expect(search.ok).toBe(true)
-      expect(search.items).toHaveLength(0)
-      expect(search.latestMemories).toEqual([])
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('clears all short-term memories for the current user', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-clear-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
-
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我叫做Ben。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
-
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我最喜歡的顏色是湖水綠。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
-
-      const beforeClear = await __memoryValidationTestUtils.listShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        limit: 10,
-      })
-
-      expect(beforeClear.items.length).toBeGreaterThan(0)
-
-      const clearResult = await __memoryValidationTestUtils.clearShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-      })
-
-      expect(clearResult.ok).toBe(true)
-      expect(clearResult.deletedCount).toBeGreaterThan(0)
-      expect(clearResult.latestMemories).toEqual([])
-
-      const afterClear = await __memoryValidationTestUtils.listShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        limit: 10,
-      })
-
-      expect(afterClear.ok).toBe(true)
-      expect(afterClear.items).toHaveLength(0)
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('resolves the mem0 alias to the AIRI-managed short-term store path', async () => {
-    const validation = await __memoryValidationTestUtils.validateShortTermMemory({
-      mode: 'open-source',
-      userId: 'ben',
-      baseUrl: 'mem0',
-      apiKey: '',
-      embedder: 'airi-local',
-      vectorStore: 'local-file',
+    const search = await __memoryValidationTestUtils.searchShortTermMemory({
+      ...createRemoteMem0ScopePayload(),
+      query: 'mango',
       topK: 5,
       searchThreshold: 0.6,
     })
 
-    expect(validation.valid).toBe(true)
-    expect(validation.resolvedStorePath).toBe(join(process.cwd(), 'mem0'))
-    // REVIEW: This assertion documents the current Vitest fallback when Electron app.getPath
-    // is unavailable. Real Electron resolves `mem0` against app.getPath('userData')`.
-  })
+    expect(search.ok).toBe(true)
+    expect(search.items[0]?.memory).toContain('mango')
 
-  it('updates conflicting identity memories instead of keeping stale duplicates', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-update-name-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
+    const clearResult = await __memoryValidationTestUtils.clearShortTermMemory({
+      ...createRemoteMem0ScopePayload(),
+    })
 
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我叫做Ben。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
+    expect(clearResult.ok).toBe(true)
+    expect(clearResult.deletedCount).toBe(1)
 
-      const secondCapture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，其實我的名字是Benjamin。' },
-          { role: 'assistant', content: '收到。' },
-        ],
-      })
+    const afterClear = await __memoryValidationTestUtils.listShortTermMemory({
+      ...createRemoteMem0ScopePayload(),
+      limit: 10,
+    })
 
-      expect(secondCapture.ok).toBe(true)
-      expect(secondCapture.items.some(item => item.event === 'update' && item.memory.includes('Benjamin'))).toBe(true)
-      expect(secondCapture.items.find(item => item.event === 'update')?.previousMemory).toContain('Ben')
-
-      const memories = await __memoryValidationTestUtils.listShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        limit: 10,
-      })
-
-      const nameMemories = memories.items.filter(item => item.memory.includes('名字是'))
-      expect(nameMemories).toHaveLength(1)
-      expect(nameMemories[0]?.memory).toContain('Benjamin')
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('updates favorite-subject memories when the same subject changes', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-update-favorite-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
-
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我最喜歡的偶像是BLACKPINK。' },
-          { role: 'assistant', content: '好的。' },
-        ],
-      })
-
-      const secondCapture = await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: '請記住，我最喜歡的偶像是NewJeans。' },
-          { role: 'assistant', content: '收到。' },
-        ],
-      })
-
-      expect(secondCapture.ok).toBe(true)
-      expect(secondCapture.items.some(item => item.event === 'update' && item.memory.includes('NewJeans'))).toBe(true)
-      expect(secondCapture.items.find(item => item.event === 'update')?.previousMemory).toContain('BLACKPINK')
-
-      const memories = await __memoryValidationTestUtils.listShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        limit: 10,
-      })
-
-      const idolMemories = memories.items.filter(item => item.memory.includes('最喜歡的偶像是'))
-      expect(idolMemories).toHaveLength(1)
-      expect(idolMemories[0]?.memory).toContain('NewJeans')
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
-  })
-
-  it('recalls a stored English color preference from a Chinese question after reopening the conversation', async () => {
-    const appDataRoot = join(tmpdir(), `airi-short-term-cross-lingual-color-${Date.now()}-${Math.random().toString(16).slice(2)}`)
-    const baseUrl = join(appDataRoot, 'mem0')
-
-    try {
-      await __memoryValidationTestUtils.captureShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        messages: [
-          { role: 'user', content: 'I like deep blue' },
-        ],
-      })
-
-      const search = await __memoryValidationTestUtils.searchShortTermMemory({
-        baseUrl,
-        userId: 'ben',
-        query: '我最喜歡的顏色是什麼？',
-        topK: 5,
-        searchThreshold: 0.6,
-      })
-
-      expect(search.ok).toBe(true)
-      expect(search.items[0]?.memory).toContain('likes deep blue')
-    }
-    finally {
-      await rm(appDataRoot, { force: true, recursive: true })
-    }
+    expect(afterClear.items).toHaveLength(0)
   })
 })
 

@@ -11,7 +11,7 @@
 - 降低 recall 對 prompt 的污染
 - 降低 short-term memory 記錯與誤記的機率
 - 讓 routing 更保守、更可預測
-- 讓 desktop local memory 與 remote mem0 mode 的產品心智一致
+- 讓 short-term memory 的 remote Mem0 心智一致
 - 為後續 llm-wiki promotion workflow 打底
 
 ## Non-Goals
@@ -20,7 +20,6 @@
 
 - 直接做完整 knowledge graph
 - 直接做全自動 long-term knowledge promotion
-- 直接替換掉現有 local short-term runtime
 - 一次把所有記憶後端抽象成完美插件系統
 
 ## Implementation Principles
@@ -143,25 +142,19 @@ These references were retrieved from AIRI memory systems. They are supporting co
 - forget flow 不退化
 - 現有 llm-assisted extraction 仍可保留
 
-## Phase 4: Backend Mode Split
+## Phase 4: Remote Mem0 Cleanup
 
 ### Objective
 
-把 desktop local runtime 與 remote mem0 mode 分成清楚的兩種產品模式。
+把 short-term memory 收斂成清楚的 remote Mem0-only 產品模式。
 
 ### Tasks
 
-1. 定義 short-term memory backend mode model。
-2. 將 UI 設定依 backend mode 分組顯示。
-3. 將 validation message 依 mode 重寫。
-4. 讓 desktop-local mode 只暴露真正生效的欄位。
-5. 讓 remote-mem0 mode 明確走 HTTP endpoint + API key + connectivity probe。
-6. 補充 i18n 文案。
-
-### Suggested Backend Modes
-
-- `desktop-local`
-- `remote-mem0`
+1. 移除當時的 desktop local runtime 與其設定欄位。
+2. 將 UI 設定收斂為 remote Mem0 需要的欄位。
+3. 將 validation message 改為 remote connectivity probe。
+4. 讓 capture / recall / clear / list 全部走 HTTP API。
+5. 補充 i18n 文案。
 
 ### Target Files
 
@@ -173,9 +166,9 @@ These references were retrieved from AIRI memory systems. They are supporting co
 
 ### Acceptance Criteria
 
-- 使用者能清楚知道自己在用本地 runtime 還是遠端 mem0
+- 使用者清楚知道短期記憶只會連 remote Mem0
 - UI 與 runtime 行為一致
-- validation 文案與實際 backend mode 對齊
+- validation 文案與實際 remote backend 對齊
 
 ## Phase 5: Provenance and Confidence
 

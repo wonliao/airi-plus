@@ -10,7 +10,7 @@
 ## 2. Settings UI
 
 - [ ] 2.1 Add memory-specific scenario components for the overview page, short-term settings page, long-term settings page, and validation alerts.
-- [ ] 2.2 Implement the short-term memory page for mem0 technology so it can configure `mem0` fields including enablement, mode, user ID, connection fields, embedder settings, vector store settings, and recall/capture behavior, without exposing a backend selector in the first release.
+- [ ] 2.2 Implement the short-term memory page for remote mem0 technology so it can configure enablement, user ID, connection fields, and recall/capture behavior without exposing a backend selector in the first release.
 - [ ] 2.3 Implement the long-term memory page for llm-wiki technology so it can configure `llm-wiki` fields including enablement, workspace paths, query mode, and promotion or review policy fields, without exposing a backend selector in the first release.
 - [ ] 2.4 Implement the memory overview page so it summarizes short-term and long-term memory status and routes users into each detailed page.
 - [ ] 2.5 Surface validation state or last validation result in the memory detail pages so `configured` is not mistaken for `validated`.
@@ -24,7 +24,8 @@
 
 ## 4. Validation and rollout boundary
 
-- [ ] 4.1 Define a minimal health-check or validation contract for short-term memory that distinguishes configured state from validated state.
+- [ ] 4.1 Define a minimal remote connectivity or validation contract for short-term memory that distinguishes configured state from validated state.
 - [ ] 4.2 Define a minimal health-check or validation contract for long-term memory that distinguishes configured state from validated state.
 - [ ] 4.3 Keep first-release scope limited to settings persistence, configured status, basic health checks, and UI flows without blocking on full runtime recall, capture, query, or promotion automation.
 - [ ] 4.4 Document the future runtime integration boundary so OpenClaw or other orchestrators can consume these settings without taking ownership of the schema.
+- [ ] 0.1 Keep this spec aligned with the shipped remote Mem0-only direction for short-term memory.

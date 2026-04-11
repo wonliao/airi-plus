@@ -2,11 +2,18 @@
 
 This runbook starts a standalone Mem0 OSS REST API for AIRI short-term memory without using OpenClaw.
 
+Use this when you want AIRI to talk to a real remote Mem0 backend. AIRI now treats short-term memory as a remote-only Mem0 integration.
+
 ## Goal
 
-Expose a local Mem0 server at `http://127.0.0.1:8000` so AIRI can validate short-term memory from:
+Expose a local Mem0 server at `http://127.0.0.1:8000` so AIRI can validate and use a remote Mem0 backend from:
 
 - `Settings -> Memory -> Short-term Memory`
+
+Recommended AIRI settings for this runbook:
+
+- `Base URL`: `http://127.0.0.1:8000`
+- `API Key`: set this only if your Docker Mem0 server enables `ADMIN_API_KEY`
 
 ## Why this runbook exists
 

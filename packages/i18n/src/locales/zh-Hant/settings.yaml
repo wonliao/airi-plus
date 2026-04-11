@@ -478,87 +478,70 @@ pages:
       title: 短期記憶
       sections:
         configuration:
-          title: mem0 設定
-          description: 設定 AIRI 用於近期事件、偏好與 recall 導向上下文的短期記憶後端。
-        extraction:
-          title: 記憶抽取
-          description: 若保持空白，短期記憶會沿用目前的內建 heuristic capture。填入後則會啟用 mem0 + llm 的輔助抽取路線。
+          title: 短期記憶設定
+          description: 設定 AIRI 連到遠端 Mem0 Docker API 所需的短期記憶範圍與連線資訊。
+        remote:
+          title: Remote Mem0 連線
+          description: AIRI 現在只會透過 HTTP 呼叫外部 Mem0 API，短期記憶 backend 不再跑在 Electron 內。
       fields:
         enabled:
           label: 啟用短期記憶
-          description: 允許 AIRI 為 mem0 支援的 recall 與 capture 準備短期記憶設定。
-        mode:
-          label: 模式
-          description: 選擇 AIRI 在首版整合時要對應的 mem0 部署模式。
-          placeholder: 選擇模式
-        userId:
-          label: 使用者 ID
-          description: mem0 應用來識別此記憶空間的穩定使用者識別碼。
-          placeholder: 例如 ben
+          description: 允許 AIRI 透過設定好的 remote Mem0 API 保存與檢索短期記憶。
         baseUrl:
-          label: 基礎 URL
-          description: 在 AIRI Electron 中，可填 `mem0`、相對於 AIRI app data 的路徑，或外部 mem0 相容 HTTP 端點。
-          placeholder: 例如 mem0、./memory/local 或 http://127.0.0.1:8000
+          label: Base URL
+          description: Mem0 Docker API 的基礎 URL。AIRI 會直接透過 HTTP 呼叫這個服務。
+          placeholder: 例如 http://127.0.0.1:8000
         apiKey:
           label: API 金鑰
-          description: 可選的平台憑證，只有在 mem0 使用 platform 模式時才需要。
-          placeholder: sk-...
-        extractionMode:
-          label: 抽取模式
-          default: 預設（目前內建 capture）
-          assisted: LLM 輔助（mem0 + llm）
-        extractionLlmStatus:
-          label: LLM 抽取狀態
-          description: 比照一般 provider 設定方式，選好已配置的聊天服務來源與模型後，就會啟用 LLM 輔助抽取。
-          configured: 已配置 LLM 抽取
-          notConfigured: 目前使用內建 capture
-        extractionLlmProvider:
-          label: 提取服務來源
-          description: 從已配置好的聊天 provider 中直接選擇，不再另外手填記憶提取憑證。
-          placeholder: 選擇已配置的服務來源
-        extractionLlmModel:
-          label: 提取模型
-          description: 從所選服務來源已列出的模型中挑一個即可。
-          placeholder: 選擇模型
-        embedder:
-          label: Embedder
-          description: 用於 recall 的 embedding 後端或設定識別碼。
-          placeholder: text-embedding-3-small
-        vectorStore:
-          label: Vector Store
-          description: mem0 用於持久化的向量資料庫後端或儲存目標。
-          placeholder: local-default
+          description: 可選。若 Mem0 Docker 啟用了 `ADMIN_API_KEY`，AIRI 會以 `X-API-Key` 送出這個值。
+          placeholder: 輸入 Mem0 API 金鑰
+        userId:
+          label: User ID
+          description: 遠端 Mem0 請求使用的主要記憶範圍識別。
+          placeholder: 例如 ben
+        agentId:
+          label: Agent ID
+          description: 可選的 agent 範圍，適合同一個 agent 在多次執行之間共享記憶。
+          placeholder: airi-agent
+        runId:
+          label: Run ID
+          description: 可選的 run 或 session 範圍，適合把記憶限制在單次對話或單個工作流內。
+          placeholder: chat-session-001
+        appId:
+          label: App ID
+          description: 可選的 app 範圍，適合區分同一位使用者在不同 AIRI 入口上的記憶。
+          placeholder: airi-desktop
         autoRecall:
           label: 自動 recall
-          description: 允許未來的 runtime 整合自動拉取近期記憶上下文。
+          description: 在 AIRI 回答前，自動從 remote Mem0 查詢相關短期記憶。
         autoCapture:
           label: 自動 capture
-          description: 允許未來的 runtime 整合自動寫回新的記憶。
+          description: 自動把對話回合送到 remote Mem0，交由它抽取可保留的記憶。
         topK:
           label: Top K
           description: 單次查詢最多取回的記憶項目數量。
         searchThreshold:
           label: 搜尋閾值
-          description: 未來 mem0 檢索流程使用的最低相似度門檻。
+          description: 短期記憶檢索時使用的最低相似度門檻。
       notes:
-        title: 首版範圍
-        content: AIRI Electron 現在已內建短期記憶 runtime。若是網頁版或進階桌面配置，仍可改用外部 mem0 相容端點。
+        title: 僅支援 Remote Mem0
+        content: AIRI 不再在本地執行 Mem0 runtime。請在這裡設定 Docker 裡的 Mem0 server，provider、embedding 與儲存配置都交由遠端服務負責。
       captureTips:
-        title: 如何讓 mem0 更容易記住
-        content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。比起很長或很模糊的段落，清楚陳述更容易被 mem0 抽取成記憶。
+        title: 如何讓記憶更容易留下來
+        content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。AIRI 會把這一輪對話送到 remote Mem0，由它決定哪些資訊值得保留並在後續相關 query 時檢索回來。
         example1: 例如：請記住，我最喜歡的水果是芒果。
         example2: 例如：記住，我叫 Ben。
         example3: 例如：記住，我偏好精確的設定步驟。
       actions:
         clear:
           title: 清理短期記憶
-          description: 清空目前使用者 ID 在 AIRI Electron 內建短期記憶 runtime 裡的所有記憶項目。
+          description: 清空目前範圍在 remote Mem0 backend 中的短期記憶項目。
           button: 清理短期記憶
           clearing: 清理中...
           success: 已清理短期記憶。
       debug:
         title: Runtime 偵錯
-        description: 用這個面板直接確認 AIRI 最近有沒有送出 capture 到 mem0，以及 mem0 或 llm-wiki 的 recall 實際查了什麼。
+        description: 用這個面板直接確認 AIRI 最近有沒有把 capture 送到 remote Mem0，以及短期記憶 recall 實際查了什麼。
         lastCapture: 最近一次 capture
         lastRecall: 最近一次 recall
         timestamp: 時間

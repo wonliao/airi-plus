@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { DoubleCheckButton, FieldCheckbox, FieldInput, FieldRange, Select } from '@proj-airi/ui'
+import { DoubleCheckButton, FieldCheckbox, FieldInput, FieldRange } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { onMounted, ref, watch } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import MemoryValidationAlerts from './memory-validation-alerts.vue'
@@ -11,56 +11,29 @@ import { useShortTermMemoryStore } from '../../../stores/modules/memory-short-te
 const store = useShortTermMemoryStore()
 const { t } = useI18n()
 const clearStatusMessage = ref('')
+
 const {
-  enabled,
-  backendId,
-  configured,
-  validationStatus,
-  lastValidation,
-  mode,
-  userId,
-  baseUrl,
   apiKey,
-  extractionMode,
-  extractionLlmConfigured,
-  extractionLlmProvider,
-  extractionLlmModel,
-  extractionProviderOptions,
-  extractionModelOptions,
-  embedder,
-  vectorStore,
-  isClearing,
-  autoRecall,
+  appId,
+  agentId,
   autoCapture,
-  topK,
-  searchThreshold,
+  autoRecall,
+  backendId,
+  baseUrl,
+  configured,
+  enabled,
+  isClearing,
   lastCaptureDebug,
   lastRecallDebug,
+  lastValidation,
+  runId,
+  searchThreshold,
+  topK,
+  userId,
+  validationStatus,
 } = storeToRefs(store)
 
-const modeOptions = [
-  { label: 'Open Source', value: 'open-source', description: 'Self-managed mem0 setup' },
-  { label: 'Platform', value: 'platform', description: 'Managed mem0 platform mode' },
-]
-
-watch(extractionLlmProvider, async (providerId, previousProviderId) => {
-  if (!providerId.trim()) {
-    extractionLlmModel.value = ''
-    return
-  }
-
-  await store.ensureExtractionProviderModelsLoaded()
-
-  if (providerId !== previousProviderId && !extractionLlmModel.value.trim()) {
-    extractionLlmModel.value = extractionModelOptions.value[0]?.value ?? ''
-  }
-}, { immediate: true })
-
-onMounted(async () => {
-  await store.ensureExtractionProviderModelsLoaded()
-})
-
-async function clearManagedShortTermMemory() {
+async function clearRemoteShortTermMemory() {
   clearStatusMessage.value = ''
 
   try {
@@ -102,28 +75,16 @@ async function clearManagedShortTermMemory() {
         </div>
 
         <div :class="['rounded-2xl border p-5', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
-          <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
-            <div :class="['flex flex-col gap-4']">
-              <div :class="['text-sm font-medium']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.mode.label') }}
-              </div>
-              <Select
-                v-model="mode"
-                :options="modeOptions"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.mode.placeholder')"
-              />
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.mode.description') }}
-              </div>
+          <div :class="['mb-5 flex flex-col gap-2']">
+            <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
+              {{ $t('settings.pages.modules.memory-short-term.sections.remote.title') }}
             </div>
+            <p :class="['text-sm text-neutral-600 dark:text-neutral-400']">
+              {{ $t('settings.pages.modules.memory-short-term.sections.remote.description') }}
+            </p>
+          </div>
 
-            <FieldInput
-              v-model="userId"
-              :label="$t('settings.pages.modules.memory-short-term.fields.userId.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.userId.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.userId.placeholder')"
-            />
-
+          <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
             <FieldInput
               v-model="baseUrl"
               :label="$t('settings.pages.modules.memory-short-term.fields.baseUrl.label')"
@@ -140,96 +101,32 @@ async function clearManagedShortTermMemory() {
             />
 
             <FieldInput
-              v-model="embedder"
-              :label="$t('settings.pages.modules.memory-short-term.fields.embedder.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.embedder.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.embedder.placeholder')"
+              v-model="userId"
+              :label="$t('settings.pages.modules.memory-short-term.fields.userId.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.userId.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.userId.placeholder')"
             />
 
             <FieldInput
-              v-model="vectorStore"
-              :label="$t('settings.pages.modules.memory-short-term.fields.vectorStore.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.vectorStore.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.vectorStore.placeholder')"
+              v-model="agentId"
+              :label="$t('settings.pages.modules.memory-short-term.fields.agentId.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.agentId.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.agentId.placeholder')"
             />
-          </div>
-        </div>
 
-        <div :class="['rounded-2xl border p-5', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
-          <div :class="['mb-5 flex flex-col gap-2']">
-            <div :class="['flex items-center justify-between gap-3']">
-              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
-                {{ $t('settings.pages.modules.memory-short-term.sections.extraction.title') }}
-              </div>
+            <FieldInput
+              v-model="runId"
+              :label="$t('settings.pages.modules.memory-short-term.fields.runId.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.runId.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.runId.placeholder')"
+            />
 
-              <span
-                :class="[
-                  'rounded-full px-2.5 py-1 text-xs font-medium',
-                  extractionLlmConfigured
-                    ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-200'
-                    : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300',
-                ]"
-              >
-                {{ extractionMode === 'llm-assisted'
-                  ? $t('settings.pages.modules.memory-short-term.fields.extractionMode.assisted')
-                  : $t('settings.pages.modules.memory-short-term.fields.extractionMode.default') }}
-              </span>
-            </div>
-
-            <p :class="['text-sm text-neutral-600 dark:text-neutral-400']">
-              {{ $t('settings.pages.modules.memory-short-term.sections.extraction.description') }}
-            </p>
-          </div>
-
-          <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
-            <div :class="['flex flex-col gap-2']">
-              <div :class="['text-sm font-medium text-neutral-800 dark:text-neutral-100']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.label') }}
-              </div>
-              <div
-                :class="[
-                  'rounded-xl border px-3 py-2 text-sm',
-                  extractionLlmConfigured
-                    ? 'border-primary-200 bg-primary-50 text-primary-700 dark:border-primary-900/40 dark:bg-primary-950/30 dark:text-primary-200'
-                    : 'border-neutral-200 bg-neutral-50 text-neutral-700 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-200',
-                ]"
-              >
-                {{ extractionLlmConfigured
-                  ? $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.configured')
-                  : $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.notConfigured') }}
-              </div>
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmStatus.description') }}
-              </div>
-            </div>
-
-            <div :class="['flex flex-col gap-4']">
-              <div :class="['text-sm font-medium']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.label') }}
-              </div>
-              <Select
-                v-model="extractionLlmProvider"
-                :options="extractionProviderOptions"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.placeholder')"
-              />
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmProvider.description') }}
-              </div>
-            </div>
-
-            <div :class="['flex flex-col gap-4']">
-              <div :class="['text-sm font-medium']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.label') }}
-              </div>
-              <Select
-                v-model="extractionLlmModel"
-                :options="extractionModelOptions"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.placeholder')"
-              />
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-short-term.fields.extractionLlmModel.description') }}
-              </div>
-            </div>
+            <FieldInput
+              v-model="appId"
+              :label="$t('settings.pages.modules.memory-short-term.fields.appId.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.appId.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.appId.placeholder')"
+            />
           </div>
         </div>
 
@@ -300,7 +197,7 @@ async function clearManagedShortTermMemory() {
               <DoubleCheckButton
                 variant="danger"
                 :disabled="!configured || isClearing"
-                @confirm="clearManagedShortTermMemory"
+                @confirm="clearRemoteShortTermMemory"
               >
                 {{ isClearing
                   ? $t('settings.pages.modules.memory-short-term.actions.clear.clearing')
@@ -357,17 +254,6 @@ async function clearManagedShortTermMemory() {
                 <div>{{ $t('settings.pages.modules.memory-short-term.debug.timestamp') }}: {{ lastCaptureDebug.at }}</div>
                 <div v-if="typeof lastCaptureDebug.resultCount === 'number'">
                   {{ $t('settings.pages.modules.memory-short-term.debug.resultCount') }}: {{ lastCaptureDebug.resultCount }}
-                </div>
-                <div v-if="lastCaptureDebug.captureMode">
-                  {{ $t('settings.pages.modules.memory-short-term.debug.captureMode') }}: {{ lastCaptureDebug.captureMode }}
-                </div>
-                <div v-if="lastCaptureDebug.candidates?.length" :class="['flex flex-col gap-1']">
-                  <div>{{ $t('settings.pages.modules.memory-short-term.debug.candidates') }}:</div>
-                  <ul :class="['list-disc pl-4']">
-                    <li v-for="candidate in lastCaptureDebug.candidates" :key="candidate">
-                      {{ candidate }}
-                    </li>
-                  </ul>
                 </div>
                 <div v-if="lastCaptureDebug.operations?.length" :class="['flex flex-col gap-1']">
                   <div>{{ $t('settings.pages.modules.memory-short-term.debug.operations') }}:</div>

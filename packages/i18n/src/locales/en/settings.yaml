@@ -517,87 +517,70 @@ pages:
       title: Short-Term Memory
       sections:
         configuration:
-          title: mem0 configuration
-          description: Configure the short-term memory backend AIRI should use for recent events, preferences, and recall-oriented context.
-        extraction:
-          title: Memory extraction
-          description: Leave these fields empty to keep the current built-in heuristic capture. Fill them to enable mem0-style LLM-assisted extraction for short-term memory capture.
+          title: Short-term memory configuration
+          description: Configure AIRI as a client of your remote Mem0 Docker API.
+        remote:
+          title: Remote Mem0 connection
+          description: AIRI only talks to an external Mem0 HTTP API. The short-term memory backend no longer runs inside Electron.
       fields:
         enabled:
           label: Enable short-term memory
-          description: Allow AIRI to prepare short-term memory settings for mem0-backed recall and capture.
-        mode:
-          label: Mode
-          description: Choose the mem0 deployment mode AIRI should target during first-release integration.
-          placeholder: Select a mode
-        userId:
-          label: User ID
-          description: Stable user identifier that mem0 should associate with this memory space.
-          placeholder: your-user-id
+          description: Allow AIRI to capture and recall short-term memory through the configured remote Mem0 API.
         baseUrl:
           label: Base URL
-          description: In AIRI Electron, this can be `mem0`, a path relative to AIRI app data, or an external mem0-compatible HTTP endpoint.
-          placeholder: mem0, ./memory/local, or http://127.0.0.1:8000
+          description: Base URL of the Mem0 Docker API. AIRI will call this service over HTTP.
+          placeholder: http://127.0.0.1:8000
         apiKey:
           label: API key
-          description: Optional platform credential. Required only when mem0 is used in platform mode.
-          placeholder: sk-...
-        extractionMode:
-          label: Extraction mode
-          default: Default (current built-in capture)
-          assisted: LLM-assisted (mem0 + llm)
-        extractionLlmStatus:
-          label: LLM extraction status
-          description: Choose a configured chat provider and one of its models to enable LLM-assisted extraction.
-          configured: LLM extraction configured
-          notConfigured: Using current built-in capture
-        extractionLlmProvider:
-          label: Extraction provider
-          description: Select from configured chat providers, similar to the normal provider settings flow.
-          placeholder: Select a configured provider
-        extractionLlmModel:
-          label: Extraction model
-          description: Select one of the models exposed by the chosen provider.
-          placeholder: Select a model
-        embedder:
-          label: Embedder
-          description: Embedding backend or configuration identifier used for recall.
-          placeholder: text-embedding-3-small
-        vectorStore:
-          label: Vector store
-          description: Vector store backend or storage target used for mem0 persistence.
-          placeholder: local-default
+          description: Optional `X-API-Key` header for Mem0 Docker when `ADMIN_API_KEY` is enabled.
+          placeholder: Enter the Mem0 API key
+        userId:
+          label: User ID
+          description: Primary memory scope identifier used in remote Mem0 requests.
+          placeholder: your-user-id
+        agentId:
+          label: Agent ID
+          description: Optional Mem0 agent scope for shared memory across multiple runs of the same agent.
+          placeholder: airi-agent
+        runId:
+          label: Run ID
+          description: Optional Mem0 run or session scope when you want memories isolated per conversation or workflow.
+          placeholder: chat-session-001
+        appId:
+          label: App ID
+          description: Optional Mem0 app scope when the same user may interact with AIRI from different surfaces.
+          placeholder: airi-desktop
         autoRecall:
           label: Auto recall
-          description: Allow future runtime integrations to pull recent memory context automatically.
+          description: Automatically query remote Mem0 for relevant memories before AIRI answers.
         autoCapture:
           label: Auto capture
-          description: Allow future runtime integrations to write new memories back automatically.
+          description: Automatically send conversation turns to remote Mem0 for memory extraction.
         topK:
           label: Top K
           description: Maximum number of recalled memory items for a single lookup.
         searchThreshold:
           label: Search threshold
-          description: Minimum similarity threshold used by future mem0 retrieval flows.
+          description: Minimum similarity threshold used by short-term memory retrieval.
       notes:
-        title: First-release scope
-        content: AIRI Electron now includes a built-in short-term memory runtime. You can keep using an external mem0-compatible endpoint on web or advanced desktop setups.
+        title: Remote Mem0 only
+        content: AIRI no longer runs a local Mem0 runtime. Configure your Docker-hosted Mem0 server here, and let that service own provider, embedding, and storage setup.
       captureTips:
-        title: How to make mem0 remember
-        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. Clear statements are easier for mem0 to extract than long or vague paragraphs.
+        title: How to make memory stick
+        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. AIRI forwards the conversation turn to remote Mem0, which decides what durable memory to keep.
         example1: 'Example: Please remember that my favorite fruit is mango.'
         example2: 'Example: Remember that my name is Ben.'
         example3: 'Example: Remember that I prefer precise setup guides.'
       actions:
         clear:
           title: Clear short-term memory
-          description: Remove every short-term memory item for the current user ID from AIRI Electron's managed short-term memory runtime.
+          description: Remove every short-term memory item for the current scope from the configured remote Mem0 backend.
           button: Clear short-term memory
           clearing: Clearing...
           success: Short-term memory cleared.
       debug:
         title: Runtime debug
-        description: Use this panel to confirm whether AIRI recently sent capture to mem0 and what mem0 or llm-wiki query was used during recall.
+        description: Use this panel to confirm what AIRI recently sent to remote Mem0 for capture and what it queried during recall.
         lastCapture: Last capture
         lastRecall: Last recall
         timestamp: Time

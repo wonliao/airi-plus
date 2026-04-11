@@ -1,5 +1,7 @@
 ## Why
 
+> Status note (2026-04-11): the shipped implementation has since converged to remote Mem0 only for short-term memory. Historical notes below explain the original settings-model proposal, but current AIRI no longer supports an embedded local Mem0 runtime.
+
 AIRI 目前已經有 `設定 -> 記憶`、`設定 -> 記憶 -> 短期記憶`、`設定 -> 記憶 -> 長期記憶` 的路由與模組入口，但實際頁面仍是 `WIP`。這讓 `mem0` 與 `llm-wiki` 雖然在架構討論中已經被視為重要能力，卻還沒有一個清楚、穩定、可擴充的 AIRI 原生設定模型可供後續實作。
 
 現有參考整合文件多以 `OpenClaw + Mem0 + llm-wiki` 的 orchestration 拓樸描述三者關係，但那代表的是一條整合路線，而不是 AIRI UI 與設定層必須接受的耦合方式。若把 `mem0` 與 `llm-wiki` 直接建模成 `openclaw.*` 設定，會造成幾個問題：
@@ -10,17 +12,17 @@ AIRI 目前已經有 `設定 -> 記憶`、`設定 -> 記憶 -> 短期記憶`、`
 
 因此，AIRI 需要一套原生的記憶 backend 設定模型，將：
 
-- 確立短期記憶使用 `mem0` 技術作為 backend
+- 確立短期記憶使用 remote `mem0` 技術作為 backend
 - 確立長期記憶使用 `llm-wiki` 技術作為 backend
 - 與 `openclaw` 的整合保留在 runtime adapter 層，而不是綁死在設定模型內
 
 ## What Changes
 
 - 將 AIRI 的 `Memory` 設定由 `WIP` 規劃為正式功能，包含總覽頁、短期記憶設定頁與長期記憶設定頁。
-- 新增短期記憶設定模型，首版固定配置 `mem0` 技術，不提供 backend selector。
+- 新增短期記憶設定模型，首版固定配置 remote `mem0` 技術，不提供 backend selector。
 - 新增長期記憶設定模型，首版固定配置 `llm-wiki` 技術，不提供 backend selector。
 - 將記憶設定建模為模組 store，而不是沿用既有 chat / speech / transcription provider registry。
-- 定義 `mem0` 與 `llm-wiki` 的健康檢查、configured 狀態、validated 狀態與基本驗證欄位，但首版不要求一次接上完整 recall/capture/promotion 全流程。
+- 定義 remote `mem0` 與 `llm-wiki` 的健康檢查、configured 狀態、validated 狀態與基本驗證欄位，但首版不要求一次接上完整 recall/capture/promotion 全流程。
 - 明確要求記憶設定命名與資料路徑不得依附 `openclaw`，例如避免 `openclaw.mem0.*`、`openclaw.wiki.*` 之類的 schema。
 - 保留未來的 runtime 整合點，允許 OpenClaw 或其他 orchestration 層消費這些設定，但不反向佔有其資料模型。
 - 要求新的記憶模組接入既有 module reset / data maintenance 流程，避免使用者重設模組設定時留下殘存記憶配置。

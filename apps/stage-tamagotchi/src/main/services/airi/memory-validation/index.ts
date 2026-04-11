@@ -14,19 +14,16 @@ import type {
   ShortTermMemoryClearResult,
   ShortTermMemoryListPayload,
   ShortTermMemoryListResult,
-  ShortTermMemoryMessageInput,
   ShortTermMemoryResultItem,
   ShortTermMemorySearchPayload,
   ShortTermMemorySearchResult,
   ShortTermMemoryValidationPayload,
   ShortTermMemoryValidationResult,
 } from '@proj-airi/stage-shared'
+import type { BrowserWindow } from 'electron'
 
-import process from 'node:process'
-
-import { randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
-import { access, copyFile, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { access, copyFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path'
 
 import { defineInvokeHandler } from '@moeru/eventa'
@@ -74,18 +71,6 @@ function joinUserDataPath(...paths: string[]) {
   return resolve(app.getPath('userData'), ...paths)
 }
 
-function getDefaultShortTermMemoryPath() {
-  return joinUserDataPath('mem0')
-}
-
-function resolveDefaultShortTermMemoryPath(inputPath: string) {
-  if (typeof app?.getPath === 'function') {
-    return getDefaultShortTermMemoryPath()
-  }
-
-  return resolve(resolveAppDataPath(inputPath), 'mem0')
-}
-
 function resolveAppDataPath(inputPath: string) {
   if (typeof app?.getPath === 'function') {
     return app.getPath('userData')
@@ -112,58 +97,7 @@ function resolveManagedWorkspacePathInput(inputPath: string, defaultWorkspacePat
 
   return normalize(resolve(trimmed))
 }
-
-function resolveShortTermStorePathInput(inputPath: string, appDataPath: string, defaultStorePath: string) {
-  const trimmed = inputPath.trim()
-
-  if (!trimmed || isElectronManagedMemoryAlias(trimmed, 'mem0')) {
-    return normalize(resolve(defaultStorePath))
-  }
-
-  if (isElectronManagedRelativePath(trimmed) && !isAbsoluteFilesystemPath(trimmed)) {
-    return normalize(resolve(appDataPath, trimmed))
-  }
-
-  return normalize(resolve(trimmed))
-}
-
-interface StoredShortTermMemory {
-  category?: string
-  conflictKey?: string
-  createdAt: string
-  id: string
-  keywords: string[]
-  memory: string
-  sourceText: string
-  updatedAt: string
-  userId: string
-}
-
-interface StoredShortTermMemoryState {
-  memories: StoredShortTermMemory[]
-}
-
-interface ParsedShortTermMemoryIdentity {
-  category: string
-  conflictKey: string
-  normalizedMemory: string
-}
-
-const shortTermMemoryStateVersion = 1
-const actTokenPattern = /<\|ACT:[\s\S]*?\|>/g
 const whitespacePattern = /\s+/g
-const trimMemoryPunctuationPattern = /^[，,。\s]+|[，,。\s]+$/g
-const nonSearchCharactersPattern = /[^\p{L}\p{N}\p{Script=Han}\s]/gu
-const latinSearchTokenPattern = /[a-z0-9]{2,}/g
-const hanSearchRunPattern = /\p{Script=Han}{2,}/gu
-const rememberPrefixZhPattern = /^(請)?記住[，,:：\s]*/u
-const rememberPrefixEnPattern = /^please remember(?: that)?[,:：\s]*/iu
-const forgetPrefixZhPattern = /^(請)?忘記[，,:：\s]*/u
-const forgetPrefixEnPattern = /^(please )?(forget|remove|delete)(?: that)?[,:：\s]*/iu
-const rememberKeywordPattern = /記住|remember/iu
-const forgetKeywordPattern = /忘記|forget|remove|delete/iu
-const internalDeletePrefixPattern = /^__DELETE__:/u
-const colorWordPattern = /湖水綠|湖水绿|深藍|深蓝|淺藍|浅蓝|藍色|蓝色|[藍蓝]|綠色|绿色|[綠绿]|紅色|红色|[紅红]|黃色|黄色|[黃黄]|紫色|紫|黑色|黑|白色|白|灰色|灰|粉色|粉|橘色|橘|棕色|棕|beige|black|blue|brown|crimson|cyan|gold|gray|green|grey|indigo|lake green|lavender|magenta|maroon|navy|orange|pink|purple|red|silver|teal|turquoise|violet|white|yellow/iu
 const stripFrontmatterPattern = /^---\n[\s\S]*?\n---\n?/u
 const searchTermTokenPattern = /[\p{L}\p{N}][\p{L}\p{N}-]*/gu
 const searchTermHanPattern = /\p{Script=Han}+/gu
@@ -173,57 +107,6 @@ const titleHeadingPattern = /^# ([^\n]+)$/mu
 const queryIntentEntityPattern = /誰是|是谁|who is|是誰/u
 const queryIntentRelationshipPattern = /關係|关系|relationship|互動|互动/u
 const queryIntentTopicPattern = /是什麼|是什么|what is|如何理解|怎麼看|怎么看|世界觀|世界观|考試|考试|旅程|結構|结构|系統|系统|主題|主题/u
-
-const memoryExtractionRules = [
-  {
-    kind: 'name-zh',
-    pattern: /(?:我叫做?|我的名字是)([^，。！？!?]+)$/u,
-  },
-  {
-    kind: 'lives-zh',
-    pattern: /我住在([^，。！？!?]+)$/u,
-  },
-  {
-    kind: 'favorite-zh',
-    pattern: /我最喜歡的?(.+)$/u,
-  },
-  {
-    kind: 'dislike-zh',
-    pattern: /我不喜歡([^，。！？!?]+)$/u,
-  },
-  {
-    kind: 'like-zh',
-    pattern: /我喜歡([^，。！？!?]+)$/u,
-  },
-  {
-    kind: 'prefer-zh',
-    pattern: /我偏好([^，。！？!?]+)$/u,
-  },
-  {
-    kind: 'name-en',
-    pattern: /my name is (.+)$/iu,
-  },
-  {
-    kind: 'lives-en',
-    pattern: /i live in (.+)$/iu,
-  },
-  {
-    kind: 'favorite-en',
-    pattern: /my favorite (.+)$/iu,
-  },
-  {
-    kind: 'dislike-en',
-    pattern: /i do not like (.+)$/iu,
-  },
-  {
-    kind: 'like-en',
-    pattern: /i like (.+)$/iu,
-  },
-  {
-    kind: 'prefer-en',
-    pattern: /i prefer (.+)$/iu,
-  },
-] as const
 
 const aliasEntries: Array<{ when: RegExp, values: string[] }> = [
   {
@@ -244,403 +127,229 @@ const aliasEntries: Array<{ when: RegExp, values: string[] }> = [
   },
 ] as const
 
-function shortTermMemoryStatePath(storePath: string) {
-  return resolve(storePath, 'memories.v1.json')
+interface RemoteMem0ResultItem {
+  categories?: unknown
+  category?: unknown
+  content?: unknown
+  created_at?: unknown
+  createdAt?: unknown
+  id?: unknown
+  memory?: unknown
+  metadata?: unknown
+  score?: unknown
+  updated_at?: unknown
+  updatedAt?: unknown
+  user_id?: unknown
+  userId?: unknown
 }
 
-async function ensureShortTermStoreDirectory(storePath: string) {
-  await mkdir(storePath, { recursive: true })
+interface RemoteMem0CaptureItem {
+  event?: unknown
+  event_id?: unknown
+  id?: unknown
+  memory?: unknown
+  previous_memory?: unknown
+  previousMemory?: unknown
 }
 
-async function readShortTermMemoryState(storePath: string): Promise<StoredShortTermMemoryState> {
-  await ensureShortTermStoreDirectory(storePath)
-  const path = shortTermMemoryStatePath(storePath)
-
-  try {
-    const raw = await readFile(path, 'utf-8')
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object') {
-      return { memories: [] }
-    }
-
-    const record = parsed as {
-      memories?: unknown
-      version?: unknown
-    }
-    const memories = Array.isArray(record.memories)
-      ? record.memories.filter(entry => !!entry && typeof entry === 'object') as StoredShortTermMemory[]
-      : []
-
-    return {
-      memories,
-    }
-  }
-  catch {
-    return { memories: [] }
-  }
+const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
+function normalizeRemoteMem0BaseUrl(value: string) {
+  const trimmed = value.trim().replace(/\/+$/u, '')
+  return trimmed || mem0DefaultBaseUrl
 }
 
-async function writeShortTermMemoryState(storePath: string, state: StoredShortTermMemoryState) {
-  await ensureShortTermStoreDirectory(storePath)
-  const path = shortTermMemoryStatePath(storePath)
-  await writeFile(path, `${JSON.stringify({
-    memories: state.memories,
-    version: shortTermMemoryStateVersion,
-  }, null, 2)}\n`)
-}
-
-function cleanMemoryText(value: string) {
-  return value
-    .replace(actTokenPattern, ' ')
-    .replace(whitespacePattern, ' ')
-    .replace(trimMemoryPunctuationPattern, '')
-    .trim()
-}
-
-function normalizeForSearch(value: string) {
-  return cleanMemoryText(value)
-    .toLowerCase()
-    .replace(nonSearchCharactersPattern, ' ')
-    .replace(whitespacePattern, ' ')
-    .trim()
-}
-
-function extractSearchTokens(value: string) {
-  const normalized = normalizeForSearch(value)
-  const latinTokens = normalized.match(latinSearchTokenPattern) ?? []
-  const chineseRuns = normalized.match(hanSearchRunPattern) ?? []
-  const chineseTokens = chineseRuns.flatMap((run) => {
-    if (run.length <= 2) {
-      return [run]
-    }
-
-    const tokens = new Set<string>([run])
-    for (let index = 0; index < run.length - 1; index += 1) {
-      tokens.add(run.slice(index, index + 2))
-    }
-    return [...tokens]
-  })
-
-  return [...new Set([...latinTokens, ...chineseTokens])]
-}
-
-function createStoredMemory(memory: string, sourceText: string, userId: string): StoredShortTermMemory {
-  const now = new Date().toISOString()
-  const identity = parseShortTermMemoryIdentity(memory)
+function createRemoteMem0Headers(apiKey: string, contentType?: string) {
   return {
-    category: identity.category,
-    conflictKey: identity.conflictKey,
-    createdAt: now,
-    id: randomUUID(),
-    keywords: extractSearchTokens(`${memory} ${sourceText}`),
-    memory,
-    sourceText,
-    updatedAt: now,
-    userId,
+    Accept: 'application/json',
+    ...(contentType ? { 'Content-Type': contentType } : {}),
+    ...(apiKey.trim() ? { 'X-API-Key': apiKey.trim() } : {}),
   }
 }
 
-function sanitizeRememberPrefix(value: string) {
-  return value
-    .replace(rememberPrefixZhPattern, '')
-    .replace(rememberPrefixEnPattern, '')
-    .trim()
-}
-
-function sanitizeForgetPrefix(value: string) {
-  return value
-    .replace(forgetPrefixZhPattern, '')
-    .replace(forgetPrefixEnPattern, '')
-    .trim()
-}
-
-function extractMemoryCandidates(messages: ShortTermMemoryMessageInput[]) {
-  const candidates = new Set<string>()
-
-  for (const message of messages) {
-    if (message.role !== 'user') {
-      continue
-    }
-
-    const sourceText = cleanMemoryText(message.content)
-    if (!sourceText) {
-      continue
-    }
-
-    if (internalDeletePrefixPattern.test(sourceText)) {
-      candidates.add(sourceText)
-      continue
-    }
-
-    const normalizedSource = sanitizeRememberPrefix(sourceText)
-    const normalizedForgetSource = sanitizeForgetPrefix(sourceText)
-    const isForgetRequest = forgetKeywordPattern.test(sourceText)
-
-    for (const rule of memoryExtractionRules) {
-      const matched = (isForgetRequest ? normalizedForgetSource : normalizedSource).match(rule.pattern)
-      if (!matched) {
-        continue
-      }
-
-      if (rule.kind === 'favorite-zh') {
-        const favoriteParts = matched[1].split('是').map(part => part.trim()).filter(Boolean)
-        if (favoriteParts.length >= 2) {
-          candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}最喜歡的${favoriteParts[0]}是${favoriteParts.slice(1).join('是')}`)
-        }
-      }
-      else if (rule.kind === 'favorite-en') {
-        const divider = ' is '
-        const favoriteIndex = matched[1].toLowerCase().indexOf(divider)
-        if (favoriteIndex >= 0) {
-          const subject = matched[1].slice(0, favoriteIndex).trim()
-          const value = matched[1].slice(favoriteIndex + divider.length).trim()
-          if (subject && value) {
-            candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}favorite ${subject} is ${value}`)
-          }
-        }
-      }
-      else if (rule.kind === 'dislike-zh') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}不喜歡${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'dislike-en') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}does not like ${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'prefer-zh') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}偏好${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'prefer-en') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}prefers ${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'lives-zh') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}住在${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'lives-en') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}lives in ${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'name-zh') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}名字是${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'name-en') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}name is ${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'like-zh') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}喜歡${matched[1].trim()}`)
-      }
-      else if (rule.kind === 'like-en') {
-        candidates.add(`${isForgetRequest ? '__DELETE__:' : ''}likes ${matched[1].trim()}`)
-      }
-    }
-
-    if (candidates.size === 0 && rememberKeywordPattern.test(sourceText)) {
-      candidates.add(normalizedSource)
-    }
-
-    if (candidates.size === 0 && isForgetRequest) {
-      candidates.add(`__DELETE__:${normalizedForgetSource}`)
-    }
-  }
-
-  return Array.from(candidates, candidate => cleanMemoryText(candidate)).filter(Boolean)
-}
-
-function parseShortTermMemoryIdentity(memory: string): ParsedShortTermMemoryIdentity {
-  const cleaned = cleanMemoryText(memory)
-  const normalizedMemory = normalizeForSearch(cleaned)
-
-  if (cleaned.startsWith('名字是') || /^name is /iu.test(cleaned)) {
-    return {
-      category: 'identity.name',
-      conflictKey: 'identity.name',
-      normalizedMemory,
-    }
-  }
-
-  if (cleaned.startsWith('住在') || /^lives in /iu.test(cleaned)) {
-    return {
-      category: 'profile.location',
-      conflictKey: 'profile.location',
-      normalizedMemory,
-    }
-  }
-
-  const favoriteZh = cleaned.match(/^最喜歡的(.+?)是(.+)$/u)
-  if (favoriteZh) {
-    return {
-      category: 'preference.favorite',
-      conflictKey: `preference.favorite:${normalizeForSearch(favoriteZh[1])}`,
-      normalizedMemory,
-    }
-  }
-
-  const favoriteEn = cleaned.match(/^favorite (.+?) is (.+)$/iu)
-  if (favoriteEn) {
-    return {
-      category: 'preference.favorite',
-      conflictKey: `preference.favorite:${normalizeForSearch(favoriteEn[1])}`,
-      normalizedMemory,
-    }
-  }
-
-  const favoriteColorZh = cleaned.match(/^(?:最喜歡的|最喜欢的)?(?:顏色|颜色)是(.+)$/u)
-  if (favoriteColorZh) {
-    return {
-      category: 'preference.color',
-      conflictKey: 'preference.color',
-      normalizedMemory,
-    }
-  }
-
-  const favoriteColorEn = cleaned.match(/^favorite color is (.+)$/iu)
-  if (favoriteColorEn) {
-    return {
-      category: 'preference.color',
-      conflictKey: 'preference.color',
-      normalizedMemory,
-    }
-  }
-
-  const likeZh = cleaned.match(/^喜歡(.+)$/u)
-  if (likeZh && colorWordPattern.test(likeZh[1])) {
-    return {
-      category: 'preference.color',
-      conflictKey: 'preference.color',
-      normalizedMemory,
-    }
-  }
-
-  const likeEn = cleaned.match(/^likes (.+)$/iu)
-  if (likeEn && colorWordPattern.test(likeEn[1])) {
-    return {
-      category: 'preference.color',
-      conflictKey: 'preference.color',
-      normalizedMemory,
-    }
-  }
-
+function buildRemoteMem0Scope(options: {
+  userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
+}) {
   return {
-    category: 'memory.generic',
-    conflictKey: normalizedMemory,
-    normalizedMemory,
+    user_id: options.userId.trim(),
+    ...(options.agentId?.trim() ? { agent_id: options.agentId.trim() } : {}),
+    ...(options.runId?.trim() ? { run_id: options.runId.trim() } : {}),
+    ...(options.appId?.trim() ? { app_id: options.appId.trim() } : {}),
   }
 }
 
-function getStoredShortTermMemoryIdentity(memory: StoredShortTermMemory): ParsedShortTermMemoryIdentity {
-  const parsedIdentity = parseShortTermMemoryIdentity(memory.memory)
+function buildRemoteMem0ListQuery(payload: {
+  userId: string
+  agentId?: string
+  runId?: string
+  limit?: number
+}) {
+  const query = new URLSearchParams()
+  query.set('user_id', payload.userId.trim())
 
-  return {
-    category: memory.category?.trim() || parsedIdentity.category,
-    conflictKey: memory.conflictKey?.trim() || parsedIdentity.conflictKey,
-    normalizedMemory: parsedIdentity.normalizedMemory,
+  if (payload.agentId?.trim()) {
+    query.set('agent_id', payload.agentId.trim())
   }
+
+  if (payload.runId?.trim()) {
+    query.set('run_id', payload.runId.trim())
+  }
+
+  if (typeof payload.limit === 'number') {
+    query.set('limit', String(Math.max(1, Math.min(payload.limit, 100))))
+  }
+
+  return query
 }
 
-function inferShortTermQueryIdentity(query: string): ParsedShortTermMemoryIdentity | undefined {
-  const cleaned = cleanMemoryText(query)
-  const normalizedMemory = normalizeForSearch(cleaned)
-  if (!normalizedMemory) {
+async function parseRemoteMem0Json(response: Response) {
+  const text = await response.text()
+  if (!text.trim()) {
     return undefined
   }
 
-  if (/我的名字|我叫什麼|my name/u.test(cleaned)) {
-    return {
-      category: 'identity.name',
-      conflictKey: 'identity.name',
-      normalizedMemory,
-    }
+  try {
+    return JSON.parse(text) as unknown
   }
-
-  if (/住在哪|住在哪裡|住在哪里|where do i live|where am i from/u.test(cleaned)) {
-    return {
-      category: 'profile.location',
-      conflictKey: 'profile.location',
-      normalizedMemory,
-    }
+  catch {
+    throw new Error(`Remote Mem0 returned non-JSON response (${response.status}).`)
   }
-
-  if (/喜歡.*顏色|喜欢.*颜色|最喜歡的顏色|最喜欢的颜色|favorite color|what color/u.test(cleaned)) {
-    return {
-      category: 'preference.color',
-      conflictKey: 'preference.color',
-      normalizedMemory,
-    }
-  }
-
-  return parseShortTermMemoryIdentity(cleaned)
 }
 
-function explainShortTermMemoryMatch(memory: StoredShortTermMemory, query: string) {
-  const normalizedQuery = normalizeForSearch(query)
-  const normalizedMemory = normalizeForSearch(memory.memory)
-  const normalizedSource = normalizeForSearch(memory.sourceText)
-
-  if (!normalizedQuery || !normalizedMemory) {
-    return {
-      matchedBy: [] as string[],
-      score: 0,
-    }
+function readRemoteMem0Items(payload: unknown) {
+  if (Array.isArray(payload)) {
+    return payload
   }
 
-  const queryTokens = extractSearchTokens(normalizedQuery)
-  const memoryTokens = new Set(memory.keywords.length > 0 ? memory.keywords : extractSearchTokens(`${normalizedMemory} ${normalizedSource}`))
-  const overlap = queryTokens.filter(token => memoryTokens.has(token))
-  const overlapScore = queryTokens.length > 0 ? overlap.length / queryTokens.length : 0
-  const substringBoost = normalizedMemory.includes(normalizedQuery) || normalizedSource.includes(normalizedQuery)
-    ? 0.45
-    : 0
-  const reverseSubstringBoost = normalizedQuery.includes(normalizedMemory)
-    ? 0.25
-    : 0
-  const memoryIdentity = getStoredShortTermMemoryIdentity(memory)
-  const queryIdentity = inferShortTermQueryIdentity(query)
-  const matchedBy: string[] = []
-
-  if (queryIdentity && memoryIdentity.conflictKey === queryIdentity.conflictKey) {
-    matchedBy.push(`conflictKey:${memoryIdentity.conflictKey}`)
+  if (!payload || typeof payload !== 'object') {
+    return []
   }
 
-  if (queryIdentity && memoryIdentity.category === queryIdentity.category) {
-    matchedBy.push(`category:${memoryIdentity.category}`)
+  const data = payload as Record<string, unknown>
+  if (Array.isArray(data.results)) {
+    return data.results
+  }
+  if (Array.isArray(data.items)) {
+    return data.items
+  }
+  if (Array.isArray(data.memories)) {
+    return data.memories
   }
 
-  if (overlap.length > 0) {
-    matchedBy.push(`tokenOverlap:${overlap.join(', ')}`)
-  }
+  return []
+}
 
-  if (substringBoost > 0) {
-    matchedBy.push('memoryContainsQuery')
-  }
-
-  if (reverseSubstringBoost > 0) {
-    matchedBy.push('queryContainsMemory')
-  }
-
-  const identityBoost = matchedBy.some(reason => reason.startsWith('conflictKey:') || reason.startsWith('category:'))
-    ? 0.85
-    : 0
+function toShortTermResultItem(memory: RemoteMem0ResultItem, userId: string): ShortTermMemoryResultItem {
+  const metadata = memory.metadata && typeof memory.metadata === 'object'
+    ? memory.metadata as Record<string, unknown>
+    : undefined
 
   return {
-    matchedBy,
-    score: Math.min(1, overlapScore + substringBoost + reverseSubstringBoost + identityBoost),
+    category: typeof memory.category === 'string'
+      ? memory.category
+      : typeof metadata?.category === 'string'
+        ? metadata.category
+        : undefined,
+    conflictKey: typeof metadata?.conflictKey === 'string' ? metadata.conflictKey : undefined,
+    createdAt: typeof memory.created_at === 'string'
+      ? memory.created_at
+      : typeof memory.createdAt === 'string'
+        ? memory.createdAt
+        : new Date(0).toISOString(),
+    id: typeof memory.id === 'string' ? memory.id : '',
+    memory: typeof memory.memory === 'string'
+      ? memory.memory
+      : typeof memory.content === 'string'
+        ? memory.content
+        : '',
+    matchedBy: Array.isArray(metadata?.matchedBy)
+      ? metadata.matchedBy.filter((value): value is string => typeof value === 'string')
+      : undefined,
+    score: typeof memory.score === 'number' ? memory.score : undefined,
+    sourceText: typeof metadata?.sourceText === 'string' ? metadata.sourceText : undefined,
+    updatedAt: typeof memory.updated_at === 'string'
+      ? memory.updated_at
+      : typeof memory.updatedAt === 'string'
+        ? memory.updatedAt
+        : undefined,
+    userId: typeof memory.user_id === 'string'
+      ? memory.user_id
+      : typeof memory.userId === 'string'
+        ? memory.userId
+        : userId,
   }
 }
 
-function sortMemoriesByRecency(memories: StoredShortTermMemory[]) {
-  return [...memories].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+function mapRemoteMem0CaptureEvent(value: unknown): ShortTermMemoryCaptureResultItem['event'] {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : ''
+
+  if (normalized === 'delete') {
+    return 'delete'
+  }
+
+  if (normalized === 'update') {
+    return 'update'
+  }
+
+  return 'add'
 }
 
-function toShortTermResultItem(memory: StoredShortTermMemory, options?: { matchedBy?: string[], score?: number }): ShortTermMemoryResultItem {
+function toShortTermCaptureResultItem(item: RemoteMem0CaptureItem): ShortTermMemoryCaptureResultItem {
   return {
-    category: memory.category,
-    conflictKey: memory.conflictKey,
-    createdAt: memory.createdAt,
-    id: memory.id,
-    memory: memory.memory,
-    matchedBy: options?.matchedBy,
-    score: options?.score,
-    sourceText: memory.sourceText,
-    updatedAt: memory.updatedAt,
-    userId: memory.userId,
+    event: mapRemoteMem0CaptureEvent(item.event),
+    id: typeof item.id === 'string' ? item.id : typeof item.event_id === 'string' ? item.event_id : '',
+    memory: typeof item.memory === 'string' ? item.memory : '',
+    previousMemory: typeof item.previousMemory === 'string'
+      ? item.previousMemory
+      : typeof item.previous_memory === 'string'
+        ? item.previous_memory
+        : undefined,
   }
+}
+
+function readRemoteMem0Message(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== 'object') {
+    return fallback
+  }
+
+  const message = (payload as Record<string, unknown>).message
+  if (typeof message === 'string' && message.trim()) {
+    return message
+  }
+
+  const detail = (payload as Record<string, unknown>).detail
+  if (typeof detail === 'string' && detail.trim()) {
+    return detail
+  }
+
+  return fallback
+}
+
+function assertRemoteMem0ResponseOk(response: Response, payload: unknown, fallback: string) {
+  if (response.ok) {
+    return
+  }
+
+  throw new Error(readRemoteMem0Message(payload, `${fallback} (${response.status})`))
+}
+
+async function listRemoteMem0Memories(payload: ShortTermMemoryListPayload) {
+  const url = new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`)
+  url.search = buildRemoteMem0ListQuery(payload).toString()
+
+  const response = await fetch(url, {
+    headers: createRemoteMem0Headers(payload.apiKey),
+    method: 'GET',
+  })
+  const responsePayload = await parseRemoteMem0Json(response)
+
+  assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 list request failed.')
+
+  return readRemoteMem0Items(responsePayload)
+    .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim()))
+    .filter(item => !!item.id && !!item.memory)
 }
 
 async function assertReadableDirectory(path: string, label: string) {
@@ -1129,28 +838,22 @@ async function queryWorkspace(payload: LlmWikiQueryPayload): Promise<LlmWikiQuer
   }
 }
 
-async function validateShortTermMemory(payload: ShortTermMemoryValidationPayload): Promise<ShortTermMemoryValidationResult> {
+async function validateShortTermMemory(
+  payload: ShortTermMemoryValidationPayload,
+): Promise<ShortTermMemoryValidationResult> {
   if (!payload.userId.trim()) {
     return {
       valid: false,
       message: 'User ID is required before short-term memory can be used.',
-      resolvedStorePath: '',
+      validatedBaseUrl: '',
     }
   }
 
-  if (!payload.embedder.trim()) {
+  if (!payload.baseUrl.trim()) {
     return {
       valid: false,
-      message: 'Embedder configuration is required for short-term memory.',
-      resolvedStorePath: '',
-    }
-  }
-
-  if (!payload.vectorStore.trim()) {
-    return {
-      valid: false,
-      message: 'Vector store configuration is required for short-term memory.',
-      resolvedStorePath: '',
+      message: 'Base URL is required before remote Mem0 can be used.',
+      validatedBaseUrl: '',
     }
   }
 
@@ -1158,7 +861,7 @@ async function validateShortTermMemory(payload: ShortTermMemoryValidationPayload
     return {
       valid: false,
       message: 'Top K must be at least 1.',
-      resolvedStorePath: '',
+      validatedBaseUrl: '',
     }
   }
 
@@ -1166,145 +869,117 @@ async function validateShortTermMemory(payload: ShortTermMemoryValidationPayload
     return {
       valid: false,
       message: 'Search threshold must stay between 0 and 1.',
-      resolvedStorePath: '',
+      validatedBaseUrl: '',
     }
   }
 
-  if (payload.mode !== 'open-source' && payload.mode !== 'platform') {
+  try {
+    const validatedBaseUrl = normalizeRemoteMem0BaseUrl(payload.baseUrl)
+    const url = new URL('/memories', `${validatedBaseUrl}/`)
+    url.search = buildRemoteMem0ListQuery({
+      userId: payload.userId,
+      agentId: payload.agentId,
+      runId: payload.runId,
+      limit: 1,
+    }).toString()
+    const response = await fetch(url, {
+      headers: createRemoteMem0Headers(payload.apiKey),
+      method: 'GET',
+    })
+    const responsePayload = await parseRemoteMem0Json(response)
+
+    assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 validation failed.')
+
+    return {
+      valid: true,
+      message: `Remote Mem0 API is reachable at ${validatedBaseUrl}.`,
+      validatedBaseUrl,
+    }
+  }
+  catch (error) {
     return {
       valid: false,
-      message: 'Mode must be either open-source or platform.',
-      resolvedStorePath: '',
+      message: errorMessageFrom(error) ?? 'Remote Mem0 validation failed.',
+      validatedBaseUrl: '',
     }
-  }
-
-  if (payload.mode === 'platform' && !payload.apiKey.trim()) {
-    return {
-      valid: false,
-      message: 'API key is required when short-term memory is configured in platform mode.',
-      resolvedStorePath: '',
-    }
-  }
-
-  const resolvedStorePath = resolveShortTermStorePathInput(
-    payload.baseUrl,
-    resolveAppDataPath(payload.baseUrl),
-    resolveDefaultShortTermMemoryPath(payload.baseUrl),
-  )
-
-  await ensureShortTermStoreDirectory(resolvedStorePath)
-
-  return {
-    valid: true,
-    message: `Short-term memory runtime is ready at ${resolvedStorePath}.`,
-    resolvedStorePath,
   }
 }
 
 async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise<ShortTermMemoryListResult> {
-  const validation = await validateShortTermMemory({
-    mode: 'open-source',
-    userId: payload.userId,
-    baseUrl: payload.baseUrl,
-    apiKey: '',
-    embedder: 'airi-local',
-    vectorStore: 'local-file',
-    topK: 5,
-    searchThreshold: 0,
-  })
-  if (!validation.valid) {
+  try {
+    const items = await listRemoteMem0Memories(payload)
+
     return {
-      ok: false,
-      message: validation.message,
-      items: [],
+      ok: true,
+      message: items.length > 0
+        ? `Loaded ${items.length} short-term memory item(s).`
+        : 'Short-term memory is empty.',
+      items,
     }
   }
-
-  const state = await readShortTermMemoryState(validation.resolvedStorePath)
-  const items = sortMemoriesByRecency(state.memories)
-    .filter(memory => memory.userId === payload.userId.trim())
-    .slice(0, Math.max(1, Math.min(payload.limit ?? 8, 20)))
-    .map(memory => toShortTermResultItem(memory))
-
-  return {
-    ok: true,
-    message: items.length > 0
-      ? `Loaded ${items.length} short-term memory item(s).`
-      : 'Short-term memory is empty.',
-    items,
+  catch (error) {
+    return {
+      ok: false,
+      message: errorMessageFrom(error) ?? 'Remote Mem0 list failed.',
+      items: [],
+    }
   }
 }
 
 async function clearShortTermMemory(payload: ShortTermMemoryClearPayload): Promise<ShortTermMemoryClearResult> {
-  const validation = await validateShortTermMemory({
-    mode: 'open-source',
-    userId: payload.userId,
-    baseUrl: payload.baseUrl,
-    apiKey: '',
-    embedder: 'airi-local',
-    vectorStore: 'local-file',
-    topK: 5,
-    searchThreshold: 0,
-  })
-  if (!validation.valid) {
-    return {
-      ok: false,
-      message: validation.message,
-      deletedCount: 0,
-      latestMemoryItems: [],
-      latestMemories: [],
+  try {
+    const latestMemoryItems = await listRemoteMem0Memories({
+      ...payload,
+      appId: undefined,
+      limit: 100,
+    })
+    const deletedCount = latestMemoryItems.length
+
+    if (deletedCount === 0) {
+      return {
+        ok: true,
+        message: 'Short-term memory is already empty.',
+        deletedCount: 0,
+        latestMemoryItems: [],
+        latestMemories: [],
+      }
     }
-  }
 
-  const state = await readShortTermMemoryState(validation.resolvedStorePath)
-  const trimmedUserId = payload.userId.trim()
-  const deletedCount = state.memories.filter(memory => memory.userId === trimmedUserId).length
+    const url = new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`)
+    url.search = buildRemoteMem0ListQuery({
+      userId: payload.userId,
+      agentId: payload.agentId,
+      runId: payload.runId,
+    }).toString()
 
-  if (deletedCount === 0) {
+    const response = await fetch(url, {
+      headers: createRemoteMem0Headers(payload.apiKey),
+      method: 'DELETE',
+    })
+    const responsePayload = await parseRemoteMem0Json(response)
+
+    assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 clear request failed.')
+
     return {
       ok: true,
-      message: 'Short-term memory is already empty.',
-      deletedCount: 0,
+      message: `Cleared ${deletedCount} short-term memory item(s).`,
+      deletedCount,
       latestMemoryItems: [],
       latestMemories: [],
     }
   }
-
-  state.memories = state.memories.filter(memory => memory.userId !== trimmedUserId)
-
-  await writeShortTermMemoryState(validation.resolvedStorePath, {
-    memories: sortMemoriesByRecency(state.memories),
-  })
-
-  return {
-    ok: true,
-    message: `Cleared ${deletedCount} short-term memory item(s).`,
-    deletedCount,
-    latestMemoryItems: [],
-    latestMemories: [],
+  catch (error) {
+    return {
+      ok: false,
+      message: errorMessageFrom(error) ?? 'Remote Mem0 clear failed.',
+      deletedCount: 0,
+      latestMemoryItems: [],
+      latestMemories: [],
+    }
   }
 }
 
 async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Promise<ShortTermMemorySearchResult> {
-  const validation = await validateShortTermMemory({
-    mode: 'open-source',
-    userId: payload.userId,
-    baseUrl: payload.baseUrl,
-    apiKey: '',
-    embedder: 'airi-local',
-    vectorStore: 'local-file',
-    topK: payload.topK,
-    searchThreshold: payload.searchThreshold,
-  })
-  if (!validation.valid) {
-    return {
-      ok: false,
-      message: validation.message,
-      items: [],
-      latestMemories: [],
-    }
-  }
-
   const trimmedQuery = payload.query.trim()
   if (!trimmedQuery) {
     return {
@@ -1315,183 +990,126 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
     }
   }
 
-  const state = await readShortTermMemoryState(validation.resolvedStorePath)
-  const scopedMemories = sortMemoriesByRecency(state.memories.filter(memory => memory.userId === payload.userId.trim()))
-  const latestMemoryItems = scopedMemories.slice(0, 8).map(memory => toShortTermResultItem(memory))
-  const latestMemories = latestMemoryItems.map(memory => memory.memory)
-  const scoredItems = scopedMemories
-    .map(memory => ({
-      match: explainShortTermMemoryMatch(memory, trimmedQuery),
-      memory,
-    }))
-    .filter(item => item.match.score > 0)
-    .sort((left, right) => right.match.score - left.match.score)
-    .slice(0, Math.max(1, Math.min(payload.topK, 20)))
+  try {
+    const latestMemoryItems = await listRemoteMem0Memories({
+      apiKey: payload.apiKey,
+      appId: payload.appId,
+      baseUrl: payload.baseUrl,
+      userId: payload.userId.trim(),
+      agentId: payload.agentId,
+      limit: 8,
+      runId: payload.runId,
+    })
+    const latestMemories = latestMemoryItems.map(item => item.memory)
+    const response = await fetch(new URL('/search', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`), {
+      body: JSON.stringify({
+        query: trimmedQuery,
+        top_k: Math.max(1, Math.min(payload.topK, 20)),
+        ...buildRemoteMem0Scope({
+          userId: payload.userId,
+          agentId: payload.agentId,
+          runId: payload.runId,
+          appId: payload.appId,
+        }),
+      }),
+      headers: createRemoteMem0Headers(payload.apiKey, 'application/json'),
+      method: 'POST',
+    })
+    const responsePayload = await parseRemoteMem0Json(response)
 
-  const filteredItems = scoredItems.filter(item => item.match.score >= payload.searchThreshold)
-  const finalItems = filteredItems.length > 0 ? filteredItems : scoredItems.slice(0, 1)
+    assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 search failed.')
 
-  return {
-    ok: true,
-    message: finalItems.length > 0
-      ? `Short-term recall matched ${finalItems.length} memory item(s).`
-      : 'Short-term recall completed but found no matching memory.',
-    items: finalItems.map(item => toShortTermResultItem(item.memory, {
-      matchedBy: item.match.matchedBy,
-      score: item.match.score,
-    })),
-    latestMemoryItems,
-    latestMemories,
+    const items = readRemoteMem0Items(responsePayload)
+      .filter(item => typeof item.score !== 'number' || item.score >= payload.searchThreshold)
+      .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim()))
+
+    return {
+      ok: true,
+      message: items.length > 0
+        ? `Short-term recall matched ${items.length} memory item(s).`
+        : 'Short-term recall completed but found no matching memory.',
+      items,
+      latestMemoryItems,
+      latestMemories,
+    }
+  }
+  catch (error) {
+    return {
+      ok: false,
+      message: errorMessageFrom(error) ?? 'Remote Mem0 search failed.',
+      items: [],
+      latestMemories: [],
+    }
   }
 }
 
 async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): Promise<ShortTermMemoryCaptureResult> {
-  const validation = await validateShortTermMemory({
-    mode: 'open-source',
-    userId: payload.userId,
-    baseUrl: payload.baseUrl,
-    apiKey: '',
-    embedder: 'airi-local',
-    vectorStore: 'local-file',
-    topK: 5,
-    searchThreshold: 0,
-  })
-  if (!validation.valid) {
+  if (payload.messages.length === 0) {
     return {
-      ok: false,
-      message: validation.message,
+      ok: true,
+      message: 'Short-term capture found no stable memory candidate in this turn.',
       items: [],
       latestMemories: [],
     }
   }
 
-  const candidates = extractMemoryCandidates(payload.messages)
-  if (candidates.length === 0) {
-    const latest = await listShortTermMemory({
-      baseUrl: payload.baseUrl,
-      userId: payload.userId,
-      limit: 8,
+  try {
+    const response = await fetch(new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`), {
+      body: JSON.stringify({
+        async_mode: false,
+        infer: true,
+        messages: payload.messages.map(message => ({
+          content: message.content,
+          role: message.role,
+        })),
+        ...buildRemoteMem0Scope({
+          userId: payload.userId,
+          agentId: payload.agentId,
+          runId: payload.runId,
+          appId: payload.appId,
+        }),
+      }),
+      headers: createRemoteMem0Headers(payload.apiKey, 'application/json'),
+      method: 'POST',
     })
+    const responsePayload = await parseRemoteMem0Json(response)
+
+    assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 capture failed.')
+
+    const captureItems = readRemoteMem0Items(responsePayload)
+      .map(item => toShortTermCaptureResultItem(item as RemoteMem0CaptureItem))
+      .filter(item => !!item.id || !!item.memory)
+    const latestMemoryItems = await listRemoteMem0Memories({
+      apiKey: payload.apiKey,
+      appId: payload.appId,
+      baseUrl: payload.baseUrl,
+      userId: payload.userId.trim(),
+      agentId: payload.agentId,
+      limit: 8,
+      runId: payload.runId,
+    })
+
     return {
       ok: true,
-      message: 'Short-term capture found no stable memory candidate in this turn.',
+      message: captureItems.length > 0
+        ? `Short-term capture stored ${captureItems.length} memory item(s).`
+        : 'Short-term capture found no stable memory candidate in this turn.',
+      items: captureItems,
+      latestMemoryItems,
+      latestMemories: latestMemoryItems.map(item => item.memory),
+    }
+  }
+  catch (error) {
+    return {
+      ok: false,
+      message: errorMessageFrom(error) ?? 'Remote Mem0 capture failed.',
       items: [],
-      latestMemoryItems: latest.items,
-      latestMemories: latest.items.map(item => item.memory),
+      latestMemories: [],
     }
-  }
-
-  const state = await readShortTermMemoryState(validation.resolvedStorePath)
-  const results: ShortTermMemoryCaptureResultItem[] = []
-  const now = new Date().toISOString()
-
-  for (const candidate of candidates) {
-    const isDeleteOperation = candidate.startsWith('__DELETE__:')
-    const candidateMemory = isDeleteOperation ? candidate.replace(/^__DELETE__:/u, '').trim() : candidate
-    if (!candidateMemory) {
-      continue
-    }
-
-    if (isDeleteOperation) {
-      const identity = inferShortTermQueryIdentity(candidateMemory) ?? parseShortTermMemoryIdentity(candidateMemory)
-      const existingIndex = state.memories.findIndex((memory) => {
-        if (memory.userId !== payload.userId.trim()) {
-          return false
-        }
-
-        const existingIdentity = getStoredShortTermMemoryIdentity(memory)
-        return existingIdentity.normalizedMemory === identity.normalizedMemory
-          || existingIdentity.conflictKey === identity.conflictKey
-          || existingIdentity.category === identity.category
-      })
-
-      if (existingIndex >= 0) {
-        const [removedMemory] = state.memories.splice(existingIndex, 1)
-        results.push({
-          event: 'delete',
-          id: removedMemory.id,
-          memory: removedMemory.memory,
-          previousMemory: removedMemory.memory,
-        })
-      }
-      continue
-    }
-
-    const identity = parseShortTermMemoryIdentity(candidateMemory)
-    const existing = state.memories.find((memory) => {
-      if (memory.userId !== payload.userId.trim()) {
-        return false
-      }
-
-      const existingIdentity = getStoredShortTermMemoryIdentity(memory)
-      return existingIdentity.conflictKey === identity.conflictKey
-    })
-
-    if (existing) {
-      const existingIdentity = getStoredShortTermMemoryIdentity(existing)
-
-      if (existingIdentity.normalizedMemory === identity.normalizedMemory) {
-        existing.category = identity.category
-        existing.conflictKey = identity.conflictKey
-        existing.updatedAt = now
-        existing.sourceText = candidateMemory
-        existing.keywords = extractSearchTokens(candidateMemory)
-        results.push({
-          event: 'update',
-          id: existing.id,
-          memory: existing.memory,
-          previousMemory: existing.memory,
-        })
-        continue
-      }
-
-      const previousMemory = existing.memory
-      existing.category = identity.category
-      existing.conflictKey = identity.conflictKey
-      existing.memory = candidateMemory
-      existing.updatedAt = now
-      existing.sourceText = candidateMemory
-      existing.keywords = extractSearchTokens(`${candidateMemory} ${candidateMemory}`)
-      results.push({
-        event: 'update',
-        id: existing.id,
-        memory: candidateMemory,
-        previousMemory,
-      })
-      continue
-    }
-
-    const stored = createStoredMemory(candidateMemory, candidateMemory, payload.userId.trim())
-    state.memories.push(stored)
-    results.push({
-      event: 'add',
-      id: stored.id,
-      memory: stored.memory,
-    })
-  }
-
-  await writeShortTermMemoryState(validation.resolvedStorePath, {
-    memories: sortMemoriesByRecency(state.memories),
-  })
-
-  const latestMemoryItems = sortMemoriesByRecency(state.memories)
-    .filter(memory => memory.userId === payload.userId.trim())
-    .slice(0, 8)
-    .map(memory => toShortTermResultItem(memory))
-  const latestMemories = latestMemoryItems.map(memory => memory.memory)
-
-  return {
-    ok: true,
-    message: results.length > 0
-      ? `Short-term capture stored ${results.length} memory item(s).`
-      : 'Short-term capture completed without storing new memory.',
-    items: results,
-    latestMemoryItems,
-    latestMemories,
   }
 }
 
-export function createMemoryValidationService(params: { context: ReturnType<typeof createContext>['context'] }) {
+export function createMemoryValidationService(params: { context: ReturnType<typeof createContext>['context'], window: BrowserWindow }) {
   const defaultWorkspaceReady = ensureDefaultWorkspace().catch((error) => {
     // NOTICE: AIRI Electron should own a default llm-wiki workspace even before the renderer
     // explicitly requests validation. Initializing it eagerly here keeps the settings page from

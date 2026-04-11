@@ -1,5 +1,7 @@
 ## Context
 
+> Status note (2026-04-11): short-term memory has since been implemented as a remote Mem0-only client integration. References below to first-release modeling still apply at the settings level, but embedded local Mem0 runtime support is no longer part of the current product direction.
+
 AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
 
 - [packages/stage-pages/src/pages/settings/memory/index.vue](/Users/ben/AI_Project/airi-plus/packages/stage-pages/src/pages/settings/memory/index.vue)
@@ -16,7 +18,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
 
 這套設施適合「外部模型或媒體服務提供者」，但不適合直接承接記憶語意。`mem0` 與 `llm-wiki` 的核心差別不只是不同 endpoint，而是不同責任：
 
-- `mem0`：近期事件、偏好、session continuity、短期 recall / capture
+- `mem0`：近期事件、偏好、session continuity、短期 recall / capture，並由 remote API 承載 backend
 - `llm-wiki`：長期知識、整理後的 wiki page、promotion、review gate
 
 在你提供的參考文件裡，這兩者常以 `OpenClaw` orchestration 為上下文被描述，但那些文件本質上是在定義 integration topology，而不是 AIRI 本身的設定模型。這次變更要解決的就是這個邊界：AIRI 應該擁有自己的記憶 backend 設定模型，並把 OpenClaw 視為未來可消費這些設定的 runtime 整合點，而不是設定層的 owner。
@@ -25,7 +27,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
 
 **Goals：**
 - 讓 AIRI 以原生設定頁配置短期記憶與長期記憶 backend。
-- 短期記憶確定使用 `mem0` 技術作為 backend，長期記憶確定使用 `llm-wiki` 技術作為 backend，且首版不提供 backend selector。
+- 短期記憶確定使用 remote `mem0` 技術作為 backend，長期記憶確定使用 `llm-wiki` 技術作為 backend，且首版不提供 backend selector。
 - 以模組 store 管理記憶設定、configured 狀態與基本驗證結果。
 - 讓記憶設定與既有 chat provider registry 解耦，避免 provider 語意污染。
 - 為未來 OpenClaw 或其他 orchestration runtime 保留 adapter 整合點，但不把設定資料掛在 `openclaw.*` 命名空間下。
@@ -62,12 +64,9 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
    - `backendId`（固定為 `mem0`）
    - `configured`
    - `validationStatus`
-   - `mode`
    - `userId`
    - `baseUrl`
    - `apiKey`
-   - `embedder`
-   - `vectorStore`
    - `autoRecall`
    - `autoCapture`
    - `topK`
@@ -119,7 +118,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
    - `packages/stage-ui/src/components/scenarios/memory/long-term-memory-settings.vue`
    - `packages/stage-ui/src/components/scenarios/memory/memory-validation-alerts.vue`
 
-5. **第一版先完成設定持久化、configured 判定與健康檢查 contract**
+5. **第一版先完成設定持久化、configured 判定與 remote health-check contract**
 
    首版不應被 runtime 全流程阻塞。優先順序應為：
 
@@ -129,7 +128,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
    - 模組列表與總覽頁能顯示狀態
 
    之後再接：
-   - `mem0` recall / write smoke test
+   - remote `mem0` recall / write smoke test
    - `llm-wiki` workspace / query smoke test
    - promotion gate
    - orchestration integration
@@ -143,7 +142,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
    - 顯示 `configured` / `enabled` / `health` 狀態
    - 提供前往子頁的入口
    - 補充角色說明：
-     - `mem0` 管近期記憶
+   - remote `mem0` 管近期記憶
      - `llm-wiki` 管長期知識
 
 7. **configured 與 validated 由記憶 store 顯式提供，而不是在 UI 端臨時推導**
@@ -183,7 +182,7 @@ AIRI 現在已經有記憶相關入口，但實際內容尚未落地：
 
 ## Confirmed First-Release Decisions
 
-- **短期記憶 backend**：確定採用 `mem0` 技術。首版頁面不提供 backend selector；若實作需要識別欄位，應以固定 `backendId=mem0` 表達，而不是暴露可切換 provider。
+- **短期記憶 backend**：確定採用 remote `mem0` 技術。首版頁面不提供 backend selector；若實作需要識別欄位，應以固定 `backendId=mem0` 表達，而不是暴露可切換 provider。
 - **長期記憶 backend**：確定採用 `llm-wiki` 技術。首版頁面不提供 backend selector；若實作需要識別欄位，應以固定 `backendId=llm-wiki` 表達，而不是暴露可切換 provider。
 - **與 OpenClaw 的關係**：OpenClaw 不是設定 owner；它僅是未來可消費這些設定的 runtime 整合方之一。
 - **validated 狀態**：`configured` 與 `validated` 必須分開建模；首版至少要有顯式 validation state 與最近一次檢查結果。

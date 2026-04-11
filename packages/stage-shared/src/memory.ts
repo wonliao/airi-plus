@@ -6,7 +6,7 @@ function getRendererWindow() {
   return (globalThis as { window?: unknown }).window
 }
 
-export type ElectronManagedMemoryPathKind = 'llm-wiki' | 'mem0'
+export type ElectronManagedMemoryPathKind = 'llm-wiki'
 const windowsAbsolutePathPattern = /^[A-Z]:[\\/]/i
 
 export function isAbsoluteFilesystemPath(value: string) {
@@ -79,12 +79,12 @@ export interface LlmWikiQueryResult {
 }
 
 export interface ShortTermMemoryValidationPayload {
-  mode: string
   userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
   baseUrl: string
   apiKey: string
-  embedder: string
-  vectorStore: string
   topK: number
   searchThreshold: number
 }
@@ -92,7 +92,7 @@ export interface ShortTermMemoryValidationPayload {
 export interface ShortTermMemoryValidationResult {
   valid: boolean
   message: string
-  resolvedStorePath: string
+  validatedBaseUrl: string
 }
 
 export interface ShortTermMemoryMessageInput {
@@ -115,7 +115,11 @@ export interface ShortTermMemoryResultItem {
 
 export interface ShortTermMemorySearchPayload {
   baseUrl: string
+  apiKey: string
   userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
   query: string
   topK: number
   searchThreshold: number
@@ -131,7 +135,11 @@ export interface ShortTermMemorySearchResult {
 
 export interface ShortTermMemoryCapturePayload {
   baseUrl: string
+  apiKey: string
   userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
   messages: ShortTermMemoryMessageInput[]
 }
 
@@ -152,7 +160,11 @@ export interface ShortTermMemoryCaptureResult {
 
 export interface ShortTermMemoryListPayload {
   baseUrl: string
+  apiKey: string
   userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
   limit?: number
 }
 
@@ -164,7 +176,10 @@ export interface ShortTermMemoryListResult {
 
 export interface ShortTermMemoryClearPayload {
   baseUrl: string
+  apiKey: string
   userId: string
+  agentId?: string
+  runId?: string
 }
 
 export interface ShortTermMemoryClearResult {

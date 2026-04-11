@@ -1,5 +1,7 @@
 ## ADDED Requirements
 
+> Status note (2026-04-11): the implementation has converged to remote Mem0-only short-term memory. The requirements below should be read with `mem0` meaning AIRI's remote Mem0 backend, not an embedded local runtime.
+
 ### Requirement: AIRI exposes native memory backend settings
 The system SHALL expose native AIRI settings for short-term and long-term memory backends instead of leaving memory configuration as `WIP`.
 
@@ -21,31 +23,31 @@ The system SHALL expose native AIRI settings for short-term and long-term memory
 - **WHEN** the user opens the long-term memory settings page
 - **THEN** the system SHALL render a page dedicated to long-term memory backend configuration
 
-### Requirement: Short-term memory is modeled as a mem0-backed module
-The system SHALL model short-term memory as an AIRI memory module whose first supported backend is `mem0`.
+### Requirement: Short-term memory is modeled as a remote mem0-backed module
+The system SHALL model short-term memory as an AIRI memory module whose first supported backend is remote `mem0`.
 
 | Example | Input | Expected outcome |
 |---|---|---|
 | Default short-term backend | Fresh settings state | Short-term memory starts disabled or in a safe empty state until configured |
-| Mem0 configured | User enables short-term memory and configures the fixed `mem0` technology | Settings persist as short-term memory module state rather than as a chat provider |
-| Required mem0 fields present | User fills the minimum mem0 fields | Short-term memory can become `configured` |
+| Mem0 configured | User enables short-term memory and configures the fixed remote `mem0` technology | Settings persist as short-term memory module state rather than as a chat provider |
+| Required mem0 fields present | User fills the minimum remote mem0 fields | Short-term memory can become `configured` |
 
 #### Scenario: Short-term memory persists as module state
 - **WHEN** the user edits short-term memory settings
 - **THEN** the system SHALL persist them as short-term memory module state rather than as chat provider credentials
 
-#### Scenario: Mem0 is the first supported short-term backend
+#### Scenario: Remote Mem0 is the first supported short-term backend
 - **WHEN** the user configures short-term memory in the first release
-- **THEN** the system SHALL support `mem0` as the primary short-term memory backend
+- **THEN** the system SHALL support remote `mem0` as the primary short-term memory backend
 
 #### Scenario: Short-term memory does not expose a backend selector in the first release
 - **WHEN** the user configures short-term memory in the first release
 - **THEN** the system SHALL present the page as mem0 configuration
 - **AND** it SHALL not require the user to choose among multiple short-term memory backends first
 
-#### Scenario: Short-term configuration includes mem0-specific fields
+#### Scenario: Short-term configuration includes remote mem0-specific fields
 - **WHEN** the user configures the `mem0` backend
-- **THEN** the system SHALL expose fields for the minimum mem0-related configuration, including connection or mode settings and recall or capture behavior
+- **THEN** the system SHALL expose fields for the minimum mem0-related configuration, including connection settings and recall or capture behavior
 
 ### Requirement: Long-term memory is modeled as an llm-wiki-backed module
 The system SHALL model long-term memory as an AIRI memory module whose first supported backend is `llm-wiki`.
@@ -99,7 +101,7 @@ The system SHALL expose configured state for short-term and long-term memory thr
 
 | Example | Input | Expected outcome |
 |---|---|---|
-| Short-term incomplete | User enables mem0 but omits required fields | Short-term memory is not configured |
+| Short-term incomplete | User enables mem0 but omits required remote fields | Short-term memory is not configured |
 | Long-term incomplete | User enables llm-wiki but omits workspace information | Long-term memory is not configured |
 | Both complete | User fills minimum required fields for both pages | Both memory modules report configured=true independently |
 
@@ -148,7 +150,7 @@ The system SHALL allow the first release of memory backend settings to ship befo
 
 #### Scenario: Full runtime automation is not required for first release
 - **WHEN** the first release of memory backend settings is delivered
-- **THEN** the system SHALL not require full mem0 recall or capture automation or full llm-wiki promotion automation to consider the settings feature complete
+- **THEN** the system SHALL not require full remote mem0 recall or capture automation or full llm-wiki promotion automation to consider the settings feature complete
 
 #### Scenario: Basic health-check boundaries are enough for first release
 - **WHEN** the system implements initial memory backend validation
