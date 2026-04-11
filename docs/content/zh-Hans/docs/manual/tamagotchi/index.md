@@ -65,6 +65,13 @@ description: 如何使用桌面版的 Project AIRI
 
 让我们从逐一讲解基本概念和功能开始吧。
 
+## 相关文档
+
+如果你想在桌面版中使用 `OpenAI 订阅` provider，可以先看这两份文档：
+
+- [使用 OpenAI 订阅](/zh-Hans/docs/manual/tamagotchi/openai-subscription)
+- [OpenAI 订阅 Provider 验证清单](/zh-Hans/docs/manual/tamagotchi/openai-subscription-validation)
+
 ## 窗口控制
 
 我们将介绍以下几个内容：
