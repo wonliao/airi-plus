@@ -1,8 +1,10 @@
 # Mem0 Standalone Runbook
 
+> NOTICE: This runbook is now historical. AIRI short-term memory no longer exposes a user-facing remote Mem0 mode and now runs through the AIRI-managed local Mem0 sidecar only.
+
 This runbook starts a standalone Mem0 OSS REST API for AIRI short-term memory without using OpenClaw.
 
-Use this when you want AIRI to talk to a real remote Mem0 backend. AIRI now treats short-term memory as a remote-only Mem0 integration.
+Use this only as a historical reference for the old standalone Docker-backed Mem0 workflow. For the current product path, use the AIRI-managed local Mem0 sidecar.
 
 ## Goal
 
@@ -12,8 +14,28 @@ Expose a local Mem0 server at `http://127.0.0.1:8000` so AIRI can validate and u
 
 Recommended AIRI settings for this runbook:
 
+- `Use AIRI-managed local Mem0`: `off`
 - `Base URL`: `http://127.0.0.1:8000`
 - `API Key`: set this only if your Docker Mem0 server enables `ADMIN_API_KEY`
+- `User ID`: a stable identifier such as `ben`
+- `Agent ID`: optional, for example `airi-agent`
+- `Run ID`: optional, for example `desktop-session`
+- `App ID`: optional, for example `airi-desktop`
+
+## Which mode to choose
+
+Choose `AIRI-managed local Mem0 sidecar` when:
+
+- you want AIRI Electron to start and stop Mem0 for you
+- you are fine with the sidecar using OpenAI directly from your Mac
+- you do not need to manage the Mem0 process yourself
+
+Choose this standalone remote runbook when:
+
+- you want a Mem0 server that AIRI treats as an external HTTP backend
+- you want to inspect or restart the Mem0 process yourself with Docker
+- you want multiple AIRI surfaces or tools to share the same Mem0 endpoint
+- you want to keep the backend lifecycle separate from AIRI Electron
 
 ## Why this runbook exists
 
@@ -338,12 +360,16 @@ curl -X POST http://127.0.0.1:8000/search \
 
 Use these values in AIRI:
 
-- `Mode`: `Open Source`
+- `Enable short-term memory`: `on`
+- `Use AIRI-managed local Mem0`: `off`
 - `User ID`: `ben`
 - `Base URL`: `http://127.0.0.1:8000`
 - `API Key`: leave empty
-- `Embedder`: `text-embedding-3-small`
-- `Vector Store`: `local-default`
+- `Agent ID`: optional, for example `airi-agent`
+- `Run ID`: optional, for example `desktop-session`
+- `App ID`: optional, for example `airi-desktop`
+- `Auto recall`: optional, recommended `on`
+- `Auto capture`: optional, recommended `on`
 
 Then click:
 
@@ -352,10 +378,24 @@ Then click:
 Expected result:
 
 ```text
-mem0 connectivity check passed via http://127.0.0.1:8000/openapi.json (200) on 127.0.0.1:8000.
+Remote Mem0 API is reachable at http://127.0.0.1:8000.
 ```
 
-## 9. Stop and restart
+If your Mem0 Docker server requires `ADMIN_API_KEY`, fill `API Key` in AIRI so requests include `X-API-Key`.
+
+## 9. End-to-end check with AIRI
+
+After validation passes, test the actual AIRI integration:
+
+1. Turn on `Auto capture`.
+2. In chat, say something explicit such as `請記住，我最喜歡芒果。`
+3. Open the short-term memory debug panel and confirm the latest capture shows `status: success`.
+4. Ask `我最喜歡什麼水果？`
+5. Confirm the latest recall shows a non-zero `resultCount`.
+
+This confirms AIRI validation, capture, recall, list, and clear are all going through the same HTTP backend.
+
+## 10. Stop and restart
 
 Stop:
 
@@ -379,7 +419,7 @@ docker logs --tail 200 mem0-oss
 
 - The official `mem0/mem0-api-server:latest` entrypoint was not directly usable here because its built-in defaults attempted `pgvector + neo4j`.
 - AIRI web validation originally failed with CORS until the custom FastAPI entrypoint added `CORSMiddleware`.
-- AIRI runtime recall/capture integration is still separate from this runbook. This runbook only guarantees:
-  - standalone mem0 startup
-  - HTTP connectivity
-  - AIRI settings-page validation
+- This runbook assumes AIRI is used as a Mem0 HTTP client. If AIRI UI text or request payloads change, re-check the exact field mapping in:
+  - [packages/stage-ui/src/stores/modules/memory-short-term.ts](/Users/ben/AI_Project/airi-plus/packages/stage-ui/src/stores/modules/memory-short-term.ts)
+  - [apps/stage-tamagotchi/src/main/services/airi/memory-validation/index.ts](/Users/ben/AI_Project/airi-plus/apps/stage-tamagotchi/src/main/services/airi/memory-validation/index.ts)
+- The Docker setup in this runbook is for the standalone remote backend path only. It does not describe the AIRI-managed local sidecar internals.

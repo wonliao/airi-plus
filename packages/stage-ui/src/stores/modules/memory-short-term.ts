@@ -14,7 +14,6 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 const shortTermMemoryClearTimeoutMsec = 5_000
-const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
 const managedLocalMem0BaseUrl = 'http://127.0.0.1:4310'
 const legacySearchThresholdDefault = 0.6
 const remoteSearchThresholdDefault = 0.45
@@ -76,18 +75,6 @@ interface Mem0CaptureResult {
   status?: string
 }
 
-interface ShortTermMemoryListLikePayload {
-  apiKey: string
-  baseUrl: string
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  openAIApiKey?: string
-  userId: string
-  agentId?: string
-  runId?: string
-  appId?: string
-  limit?: number
-}
-
 function isLegacyBrokenDebugEntry(value: unknown): value is '[object Object]' {
   return value === '[object Object]'
 }
@@ -134,7 +121,7 @@ function buildMem0RecallPrompt(query: string, results: Mem0SearchResult[]) {
 
 export function normalizeMem0BaseUrl(value: string) {
   const trimmed = value.trim().replace(/\/+$/u, '')
-  return trimmed || mem0DefaultBaseUrl
+  return trimmed || managedLocalMem0BaseUrl
 }
 
 export function resolveMem0RemotePath(operation: 'memories' | 'search') {
@@ -256,172 +243,11 @@ function toRuntimeDebugEvents(items: Mem0CaptureResult[] | undefined) {
     }))
 }
 
-async function parseRemoteJson(response: Response) {
-  const text = await response.text()
-  if (!text.trim()) {
-    return undefined
-  }
-
-  try {
-    return JSON.parse(text) as unknown
-  }
-  catch {
-    throw new Error(`Remote Mem0 returned non-JSON response (${response.status}).`)
-  }
-}
-
-function readRemoteItems(payload: unknown) {
-  if (Array.isArray(payload)) {
-    return payload
-  }
-
-  if (!payload || typeof payload !== 'object') {
-    return []
-  }
-
-  const data = payload as Record<string, unknown>
-  if (Array.isArray(data.results)) {
-    return data.results
-  }
-  if (Array.isArray(data.items)) {
-    return data.items
-  }
-  if (Array.isArray(data.memories)) {
-    return data.memories
-  }
-
-  return []
-}
-
-function readRemoteMessage(payload: unknown, fallback: string) {
-  if (!payload || typeof payload !== 'object') {
-    return fallback
-  }
-
-  const message = (payload as Record<string, unknown>).message
-  if (typeof message === 'string' && message.trim()) {
-    return message
-  }
-
-  const detail = (payload as Record<string, unknown>).detail
-  if (typeof detail === 'string' && detail.trim()) {
-    return detail
-  }
-
-  return fallback
-}
-
-async function requestRemoteMem0List(payload: ShortTermMemoryListLikePayload) {
-  const url = new URL(resolveMem0RemotePath('memories'), `${normalizeMem0BaseUrl(payload.baseUrl)}/`)
-  url.search = buildMem0ListQuery(payload).toString()
-
-  const response = await fetch(url, {
-    headers: createMem0Headers(payload.apiKey),
-    method: 'GET',
-  })
-  const responsePayload = await parseRemoteJson(response)
-  if (!response.ok) {
-    throw new Error(readRemoteMessage(responsePayload, `Remote Mem0 list failed (${response.status}).`))
-  }
-
-  return readRemoteItems(responsePayload) as Array<Record<string, unknown>>
-}
-
-async function validateShortTermMemoryRemote(payload: {
-  apiKey: string
-  baseUrl: string
-  userId: string
-  agentId?: string
-  runId?: string
-}) {
-  await requestRemoteMem0List({
-    apiKey: payload.apiKey,
-    baseUrl: payload.baseUrl,
-    userId: payload.userId,
-    agentId: payload.agentId,
-    limit: 1,
-    runId: payload.runId,
-  })
-
-  return {
-    message: `Remote Mem0 API is reachable at ${normalizeMem0BaseUrl(payload.baseUrl)}.`,
-    valid: true,
-  }
-}
-
-async function searchShortTermMemoryRemote(payload: {
-  apiKey: string
-  baseUrl: string
-  userId: string
-  agentId?: string
-  runId?: string
-  appId?: string
-  query: string
-  topK: number
-}) {
-  const response = await fetch(new URL(resolveMem0RemotePath('search'), `${normalizeMem0BaseUrl(payload.baseUrl)}/`), {
-    body: JSON.stringify(buildMem0SearchRequestBody(payload)),
-    headers: createMem0Headers(payload.apiKey, { contentType: 'application/json' }),
-    method: 'POST',
-  })
-  const responsePayload = await parseRemoteJson(response)
-  if (!response.ok) {
-    throw new Error(readRemoteMessage(responsePayload, `Remote Mem0 search failed (${response.status}).`))
-  }
-
-  return readRemoteItems(responsePayload) as Mem0SearchResult[]
-}
-
-async function captureShortTermMemoryRemote(payload: {
-  apiKey: string
-  baseUrl: string
-  userId: string
-  agentId?: string
-  runId?: string
-  appId?: string
-  messages: Mem0MessageInput[]
-}) {
-  const response = await fetch(new URL(resolveMem0RemotePath('memories'), `${normalizeMem0BaseUrl(payload.baseUrl)}/`), {
-    body: JSON.stringify(buildMem0CaptureRequestBody(payload)),
-    headers: createMem0Headers(payload.apiKey, { contentType: 'application/json' }),
-    method: 'POST',
-  })
-  const responsePayload = await parseRemoteJson(response)
-  if (!response.ok) {
-    throw new Error(readRemoteMessage(responsePayload, `Remote Mem0 capture failed (${response.status}).`))
-  }
-
-  return readRemoteItems(responsePayload) as Mem0CaptureResult[]
-}
-
-async function clearShortTermMemoryRemote(payload: {
-  apiKey: string
-  baseUrl: string
-  userId: string
-  agentId?: string
-  runId?: string
-}) {
-  const url = new URL(resolveMem0RemotePath('memories'), `${normalizeMem0BaseUrl(payload.baseUrl)}/`)
-  url.search = buildMem0ListQuery(payload).toString()
-
-  const response = await fetch(url, {
-    headers: createMem0Headers(payload.apiKey),
-    method: 'DELETE',
-  })
-  const responsePayload = await parseRemoteJson(response)
-  if (!response.ok) {
-    throw new Error(readRemoteMessage(responsePayload, `Remote Mem0 clear failed (${response.status}).`))
-  }
-}
-
 const defaultShortTermMemorySettings = {
-  apiKey: '',
   appId: '',
   agentId: '',
   autoCapture: true,
   autoRecall: true,
-  baseUrl: mem0DefaultBaseUrl,
-  deploymentMode: 'remote' as const,
   enabled: true,
   openAIApiKey: '',
   runId: '',
@@ -435,9 +261,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   const validationStatus = useLocalStorageManualReset<MemoryValidationStatus>('settings/memory/short-term/validation-status', 'idle')
   const lastValidation = useLocalStorageManualReset<string>('settings/memory/short-term/last-validation', '')
 
-  const baseUrl = useLocalStorageManualReset<string>('settings/memory/short-term/base-url', defaultShortTermMemorySettings.baseUrl)
-  const apiKey = useLocalStorageManualReset<string>('settings/memory/short-term/api-key', defaultShortTermMemorySettings.apiKey)
-  const deploymentMode = useLocalStorageManualReset<'electron-managed-local' | 'remote'>('settings/memory/short-term/deployment-mode', defaultShortTermMemorySettings.deploymentMode)
   const openAIApiKey = useLocalStorageManualReset<string>('settings/memory/short-term/openai-api-key', defaultShortTermMemorySettings.openAIApiKey)
   const userId = useLocalStorageManualReset<string>('settings/memory/short-term/user-id', defaultShortTermMemorySettings.userId)
   const agentId = useLocalStorageManualReset<string>('settings/memory/short-term/agent-id', defaultShortTermMemorySettings.agentId)
@@ -467,10 +290,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     userId.value = defaultShortTermMemorySettings.userId
   }
 
-  if (!baseUrl.value.trim()) {
-    baseUrl.value = defaultShortTermMemorySettings.baseUrl
-  }
-
   // NOTICE: Short-term recall against remote Mem0 can land just below 0.5 for
   // natural Chinese paraphrases like "我的名字?" -> "名字是 Nora". If a user is
   // still on the old default threshold, migrate it to the safer remote default.
@@ -478,12 +297,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     searchThreshold.value = defaultShortTermMemorySettings.searchThreshold
   }
 
-  const backendId = computed(() => 'remote-mem0')
-  const isManagedLocal = computed(() => deploymentMode.value === 'electron-managed-local')
-  const activeBaseUrl = computed(() => isManagedLocal.value ? managedLocalMem0BaseUrl : baseUrl.value.trim())
+  const backendId = computed(() => 'mem0-sidecar')
+  const activeBaseUrl = computed(() => managedLocalMem0BaseUrl)
   const configured = computed(() => enabled.value
     && !!userId.value.trim()
-    && (isManagedLocal.value ? !!openAIApiKey.value.trim() : !!baseUrl.value.trim()))
+    && !!openAIApiKey.value.trim())
   const runtimeReady = computed(() => enabled.value && configured.value && validationStatus.value === 'success')
 
   function setCaptureDebug(entry: Mem0RuntimeDebugEntry) {
@@ -505,10 +323,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     const payload = {
-      apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: activeBaseUrl.value,
-      deploymentMode: deploymentMode.value,
       openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
@@ -518,14 +333,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
     try {
       const desktopResponse = await listShortTermMemoryOnDesktop(payload)
-      const items = desktopResponse?.ok
-        ? desktopResponse.items
-        : (await requestRemoteMem0List(payload)).map(item => ({
-            category: typeof item.category === 'string' ? item.category : undefined,
-            conflictKey: typeof item.conflictKey === 'string' ? item.conflictKey : undefined,
-            id: typeof item.id === 'string' ? item.id : '',
-            memory: typeof item.memory === 'string' ? item.memory : typeof item.content === 'string' ? item.content : '',
-          }))
+      if (!desktopResponse) {
+        return []
+      }
+
+      const items = desktopResponse.ok ? desktopResponse.items : []
 
       return items
         .map(item => ({
@@ -570,15 +382,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       return { message: lastValidation.value, valid: false }
     }
 
-    if (isManagedLocal.value && !openAIApiKey.value.trim()) {
+    if (!openAIApiKey.value.trim()) {
       validationStatus.value = 'error'
       lastValidation.value = 'OpenAI API key is required before AIRI-managed local Mem0 can be used.'
-      return { message: lastValidation.value, valid: false }
-    }
-
-    if (!isManagedLocal.value && !baseUrl.value.trim()) {
-      validationStatus.value = 'error'
-      lastValidation.value = 'Base URL is required before remote Mem0 can be used.'
       return { message: lastValidation.value, valid: false }
     }
 
@@ -596,9 +402,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
     try {
       const payload = {
-        apiKey: apiKey.value.trim(),
-        baseUrl: activeBaseUrl.value,
-        deploymentMode: deploymentMode.value,
         openAIApiKey: openAIApiKey.value.trim(),
         userId: userId.value.trim(),
         agentId: agentId.value.trim(),
@@ -608,7 +411,10 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         searchThreshold: searchThreshold.value,
       }
       const desktopValidation = await validateShortTermMemoryOnDesktop(payload)
-      const validation = desktopValidation ?? await validateShortTermMemoryRemote(payload)
+      const validation = desktopValidation ?? {
+        message: 'Short-term memory validation is only available on AIRI Electron.',
+        valid: false,
+      }
 
       validationStatus.value = validation.valid ? 'success' : 'error'
       lastValidation.value = validation.message
@@ -616,7 +422,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
     catch (error) {
       validationStatus.value = 'error'
-      lastValidation.value = errorMessageFrom(error) ?? 'Remote Mem0 validation failed.'
+      lastValidation.value = errorMessageFrom(error) ?? 'Managed local Mem0 validation failed.'
       return { message: lastValidation.value, valid: false }
     }
   }
@@ -644,10 +450,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     const payload = {
-      apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: activeBaseUrl.value,
-      deploymentMode: deploymentMode.value,
       openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
@@ -664,17 +467,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         }),
         fetchLatestMemoryItems(),
       ])
+      if (!desktopResponse) {
+        throw new Error('Short-term memory search is only available on AIRI Electron.')
+      }
 
-      const finalResults = (desktopResponse?.ok
-        ? desktopResponse.items
-        : await searchShortTermMemoryRemote(payload).then(results =>
-            results
-              .filter(item => typeof item.score !== 'number' || item.score >= searchThreshold.value)
-              .map(item => ({
-                memory: readMem0MemoryText(item),
-                score: item.score,
-              })),
-          ))
+      const finalResults = (desktopResponse.ok ? desktopResponse.items : [])
         .filter(item => !!item.memory)
         .slice(0, topK.value)
 
@@ -689,7 +486,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
           memory: item.memory,
           score: item.score,
         })),
-        message: desktopResponse?.message ?? (
+        message: desktopResponse.message || (
           finalResults.length > 0
             ? `Short-term recall matched ${finalResults.length} memory item(s).`
             : 'Short-term recall completed but found no matching memory.'
@@ -745,10 +542,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     }
 
     const payload = {
-      apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: activeBaseUrl.value,
-      deploymentMode: deploymentMode.value,
       openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
@@ -758,10 +552,12 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
     try {
       const desktopResponse = await captureShortTermMemoryOnDesktop(payload)
-      const captureItems = desktopResponse?.ok
-        ? desktopResponse.items
-        : await captureShortTermMemoryRemote(payload)
-      const latestMemoryItems = desktopResponse?.latestMemoryItems?.map(item => ({
+      if (!desktopResponse) {
+        throw new Error('Short-term memory capture is only available on AIRI Electron.')
+      }
+
+      const captureItems = desktopResponse.ok ? desktopResponse.items : []
+      const latestMemoryItems = desktopResponse.latestMemoryItems?.map(item => ({
         category: item.category,
         conflictKey: item.conflictKey,
         id: item.id,
@@ -774,7 +570,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         events: toRuntimeDebugEvents(captureItems),
         latestMemoryItems,
         latestMemories: latestMemoryItems.map(item => item.memory),
-        message: desktopResponse?.message ?? (
+        message: desktopResponse.message || (
           captureItems.length > 0
             ? `Short-term capture stored ${captureItems.length} memory item(s).`
             : 'Short-term capture found no stable memory candidate in this turn.'
@@ -825,9 +621,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
     try {
       const payload = {
-        apiKey: apiKey.value.trim(),
-        baseUrl: activeBaseUrl.value,
-        deploymentMode: deploymentMode.value,
         openAIApiKey: openAIApiKey.value.trim(),
         userId: userId.value.trim(),
         agentId: agentId.value.trim(),
@@ -867,24 +660,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         })
         return
       }
-
-      await clearShortTermMemoryRemote(payload)
-      setCaptureDebug({
-        at: new Date().toISOString(),
-        captureMode: 'default',
-        events: [],
-        latestMemoryItems: [],
-        latestMemories: [],
-        message: latestMemoryItems.length > 0
-          ? `Cleared ${latestMemoryItems.length} short-term memory item(s).`
-          : 'Short-term memory is already empty.',
-        operations: latestMemoryItems.length > 0
-          ? [`CLEAR: deleted ${latestMemoryItems.length} short-term memory item(s)`]
-          : undefined,
-        payload: `Cleared short-term memory for user ${userId.value.trim()}.`,
-        resultCount: latestMemoryItems.length,
-        status: 'success',
-      })
+      throw new Error('Short-term memory clear is only available on AIRI Electron.')
     }
     catch (error) {
       setCaptureDebug({
@@ -903,9 +679,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   function resetState() {
     enabled.reset()
-    baseUrl.reset()
-    apiKey.reset()
-    deploymentMode.reset()
     openAIApiKey.reset()
     userId.reset()
     agentId.reset()
@@ -922,21 +695,17 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   }
 
   return {
-    apiKey,
     appId,
     agentId,
     activeBaseUrl,
     autoCapture,
     autoRecall,
     backendId,
-    baseUrl,
     buildRecallPrompt,
     captureMessages,
     clearShortTermMemory,
     configured,
-    deploymentMode,
     enabled,
-    isManagedLocal,
     isClearing,
     lastCaptureDebug,
     lastRecallDebug,

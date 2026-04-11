@@ -348,6 +348,12 @@ const server = createServer(async (request, response) => {
   }
 })
 
+server.on('error', (error) => {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`[mem0-sidecar] server failed: ${message}`)
+  process.exitCode = 1
+})
+
 server.listen(port, '127.0.0.1', () => {
   console.info(`[mem0-sidecar] listening on http://127.0.0.1:${port}`)
 })

@@ -9,10 +9,10 @@ import {
   resolveMem0RemotePath,
 } from './memory-short-term'
 
-describe('mem0 remote helpers', () => {
+describe('mem0 HTTP helpers', () => {
   it('normalizes the configured base URL', () => {
     expect(normalizeMem0BaseUrl('http://127.0.0.1:8000/')).toBe('http://127.0.0.1:8000')
-    expect(normalizeMem0BaseUrl('')).toBe('http://127.0.0.1:8000')
+    expect(normalizeMem0BaseUrl('')).toBe('http://127.0.0.1:4310')
   })
 
   it('builds OSS headers and paths', () => {

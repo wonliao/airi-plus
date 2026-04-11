@@ -518,25 +518,14 @@ pages:
       sections:
         configuration:
           title: Short-term memory configuration
-          description: Configure AIRI as a client of your remote Mem0 Docker API.
+          description: Configure AIRI-managed local Mem0 sidecar settings and memory scope.
         remote:
-          title: Remote Mem0 connection
-          description: AIRI can talk to either your own remote Mem0 API or an AIRI-managed local Mem0 sidecar that still exposes the same HTTP shape.
+          title: Local Mem0 sidecar
+          description: AIRI starts and manages a local Mem0 sidecar on this Mac, then talks to it over HTTP.
       fields:
         enabled:
           label: Enable short-term memory
-          description: Allow AIRI to capture and recall short-term memory through the configured remote Mem0 API.
-        useManagedLocal:
-          label: Use AIRI-managed local Mem0 service
-          description: Let AIRI start and manage a local Mem0 sidecar on this Mac. AIRI will still talk to it over HTTP as a Mem0 client.
-        baseUrl:
-          label: Base URL
-          description: Base URL of the Mem0 Docker API. AIRI will call this service over HTTP.
-          placeholder: http://127.0.0.1:8000
-        apiKey:
-          label: API key
-          description: Optional `X-API-Key` header for Mem0 Docker when `ADMIN_API_KEY` is enabled.
-          placeholder: Enter the Mem0 API key
+          description: Allow AIRI to capture and recall short-term memory through the AIRI-managed local Mem0 sidecar.
         openAIApiKey:
           label: OpenAI API key
           description: Required for the AIRI-managed local Mem0 sidecar. The sidecar uses OpenAI for memory extraction and embeddings.
@@ -546,7 +535,7 @@ pages:
           description: AIRI chooses and manages this local Mem0 sidecar endpoint automatically.
         userId:
           label: User ID
-          description: Primary memory scope identifier used in remote Mem0 requests.
+          description: Primary memory scope identifier used in Mem0 requests.
           placeholder: your-user-id
         agentId:
           label: Agent ID
@@ -562,10 +551,10 @@ pages:
           placeholder: airi-desktop
         autoRecall:
           label: Auto recall
-          description: Automatically query remote Mem0 for relevant memories before AIRI answers.
+          description: Automatically query the AIRI-managed local Mem0 sidecar for relevant memories before AIRI answers.
         autoCapture:
           label: Auto capture
-          description: Automatically send conversation turns to remote Mem0 for memory extraction.
+          description: Automatically send conversation turns to the AIRI-managed local Mem0 sidecar for memory extraction.
         topK:
           label: Top K
           description: Maximum number of recalled memory items for a single lookup.
@@ -573,24 +562,24 @@ pages:
           label: Search threshold
           description: Minimum similarity threshold used by short-term memory retrieval.
       notes:
-        title: Remote Mem0 only
-        content: AIRI still uses Mem0 through an HTTP API. You can point it at your own Docker-hosted Mem0 service, or let AIRI manage a local OpenAI-backed Mem0 sidecar for you.
+        title: AIRI-managed sidecar
+        content: AIRI uses short-term memory through its own local Mem0 sidecar. The sidecar is started and managed by AIRI, while the app still talks to it through HTTP.
       captureTips:
         title: How to make memory stick
-        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. AIRI forwards the conversation turn to remote Mem0, which decides what durable memory to keep.
+        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. AIRI forwards the conversation turn to the local Mem0 sidecar, which decides what durable memory to keep.
         example1: 'Example: Please remember that my favorite fruit is mango.'
         example2: 'Example: Remember that my name is Ben.'
         example3: 'Example: Remember that I prefer precise setup guides.'
       actions:
         clear:
           title: Clear short-term memory
-          description: Remove every short-term memory item for the current scope from the configured remote Mem0 backend.
+          description: Remove every short-term memory item for the current scope from the AIRI-managed local Mem0 sidecar.
           button: Clear short-term memory
           clearing: Clearing...
           success: Short-term memory cleared.
       debug:
         title: Runtime debug
-        description: Use this panel to confirm what AIRI recently sent to remote Mem0 for capture and what it queried during recall.
+        description: Use this panel to confirm what AIRI recently sent to the local Mem0 sidecar for capture and what it queried during recall.
         lastCapture: Last capture
         lastRecall: Last recall
         timestamp: Time

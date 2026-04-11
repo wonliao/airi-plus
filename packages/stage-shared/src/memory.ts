@@ -79,14 +79,11 @@ export interface LlmWikiQueryResult {
 }
 
 export interface ShortTermMemoryValidationPayload {
-  deploymentMode?: 'electron-managed-local' | 'remote'
   userId: string
   agentId?: string
   runId?: string
   appId?: string
-  baseUrl: string
-  apiKey: string
-  openAIApiKey?: string
+  openAIApiKey: string
   topK: number
   searchThreshold: number
 }
@@ -116,10 +113,7 @@ export interface ShortTermMemoryResultItem {
 }
 
 export interface ShortTermMemorySearchPayload {
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  baseUrl: string
-  apiKey: string
-  openAIApiKey?: string
+  openAIApiKey: string
   userId: string
   agentId?: string
   runId?: string
@@ -138,10 +132,7 @@ export interface ShortTermMemorySearchResult {
 }
 
 export interface ShortTermMemoryCapturePayload {
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  baseUrl: string
-  apiKey: string
-  openAIApiKey?: string
+  openAIApiKey: string
   userId: string
   agentId?: string
   runId?: string
@@ -165,10 +156,7 @@ export interface ShortTermMemoryCaptureResult {
 }
 
 export interface ShortTermMemoryListPayload {
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  baseUrl: string
-  apiKey: string
-  openAIApiKey?: string
+  openAIApiKey: string
   userId: string
   agentId?: string
   runId?: string
@@ -183,10 +171,7 @@ export interface ShortTermMemoryListResult {
 }
 
 export interface ShortTermMemoryClearPayload {
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  baseUrl: string
-  apiKey: string
-  openAIApiKey?: string
+  openAIApiKey: string
   userId: string
   agentId?: string
   runId?: string

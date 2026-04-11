@@ -11,7 +11,7 @@
 - 降低 recall 對 prompt 的污染
 - 降低 short-term memory 記錯與誤記的機率
 - 讓 routing 更保守、更可預測
-- 讓 short-term memory 的 remote Mem0 心智一致
+- 讓 short-term memory 的 Mem0 HTTP client 心智一致
 - 為後續 llm-wiki promotion workflow 打底
 
 ## Non-Goals
@@ -142,19 +142,19 @@ These references were retrieved from AIRI memory systems. They are supporting co
 - forget flow 不退化
 - 現有 llm-assisted extraction 仍可保留
 
-## Phase 4: Remote Mem0 Cleanup
+## Phase 4: Mem0 Deployment Cleanup
 
 ### Objective
 
-把 short-term memory 收斂成清楚的 remote Mem0-only 產品模式。
+把 short-term memory 收斂成清楚的 Mem0 HTTP client 產品模式，並固定使用 AIRI-managed local sidecar。
 
 ### Tasks
 
-1. 移除當時的 desktop local runtime 與其設定欄位。
-2. 將 UI 設定收斂為 remote Mem0 需要的欄位。
-3. 將 validation message 改為 remote connectivity probe。
-4. 讓 capture / recall / clear / list 全部走 HTTP API。
-5. 補充 i18n 文案。
+1. 移除舊的 embedded runtime / alias / 過時文案。
+2. 將 UI 設定收斂為 Mem0 HTTP client 真正需要的欄位。
+3. 讓驗證與啟動訊息完全對齊 local sidecar。
+4. 讓 capture / recall / clear / list 全部走相同的 HTTP API 契約。
+5. 補充 i18n 文案與 sidecar 說明。
 
 ### Target Files
 
@@ -166,9 +166,10 @@ These references were retrieved from AIRI memory systems. They are supporting co
 
 ### Acceptance Criteria
 
-- 使用者清楚知道短期記憶只會連 remote Mem0
+- 使用者清楚知道短期記憶一律透過 Mem0 HTTP API 運作
+- 使用者清楚知道短期記憶固定走 AIRI-managed local sidecar
 - UI 與 runtime 行為一致
-- validation 文案與實際 remote backend 對齊
+- validation 文案與實際 backend 狀態對齊
 
 ## Phase 5: Provenance and Confidence
 

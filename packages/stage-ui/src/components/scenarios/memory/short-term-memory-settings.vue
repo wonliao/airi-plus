@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { DoubleCheckButton, FieldCheckbox, FieldInput, FieldRange } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import MemoryValidationAlerts from './memory-validation-alerts.vue'
@@ -13,17 +13,13 @@ const { t } = useI18n()
 const clearStatusMessage = ref('')
 
 const {
-  apiKey,
   appId,
   agentId,
   autoCapture,
   autoRecall,
   backendId,
-  baseUrl,
   configured,
-  deploymentMode,
   enabled,
-  isManagedLocal,
   isClearing,
   lastCaptureDebug,
   lastRecallDebug,
@@ -35,11 +31,6 @@ const {
   userId,
   validationStatus,
 } = storeToRefs(store)
-
-const useManagedLocalService = computed({
-  get: () => deploymentMode.value === 'electron-managed-local',
-  set: value => deploymentMode.value = value ? 'electron-managed-local' : 'remote',
-})
 
 async function clearRemoteShortTermMemory() {
   clearStatusMessage.value = ''
@@ -92,51 +83,26 @@ async function clearRemoteShortTermMemory() {
             </p>
           </div>
 
-          <FieldCheckbox
-            v-model="useManagedLocalService"
-            :label="$t('settings.pages.modules.memory-short-term.fields.useManagedLocal.label')"
-            :description="$t('settings.pages.modules.memory-short-term.fields.useManagedLocal.description')"
-          />
-
           <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
-            <template v-if="isManagedLocal">
-              <FieldInput
-                v-model="openAIApiKey"
-                type="password"
-                :label="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.label')"
-                :description="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.description')"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.placeholder')"
-              />
+            <FieldInput
+              v-model="openAIApiKey"
+              type="password"
+              :label="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.label')"
+              :description="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.description')"
+              :placeholder="$t('settings.pages.modules.memory-short-term.fields.openAIApiKey.placeholder')"
+            />
 
-              <div :class="['rounded-xl border p-4 text-sm', 'border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-400']">
-                <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
-                  {{ $t('settings.pages.modules.memory-short-term.fields.managedBaseUrl.label') }}
-                </div>
-                <p :class="['mt-1']">
-                  {{ $t('settings.pages.modules.memory-short-term.fields.managedBaseUrl.description') }}
-                </p>
-                <div :class="['mt-2 font-mono text-xs']">
-                  {{ store.activeBaseUrl }}
-                </div>
+            <div :class="['rounded-xl border p-4 text-sm', 'border-neutral-200 bg-neutral-50 text-neutral-600 dark:border-neutral-800 dark:bg-neutral-950/40 dark:text-neutral-400']">
+              <div :class="['font-medium text-neutral-800 dark:text-neutral-100']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.managedBaseUrl.label') }}
               </div>
-            </template>
-
-            <template v-else>
-              <FieldInput
-                v-model="baseUrl"
-                :label="$t('settings.pages.modules.memory-short-term.fields.baseUrl.label')"
-                :description="$t('settings.pages.modules.memory-short-term.fields.baseUrl.description')"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.baseUrl.placeholder')"
-              />
-
-              <FieldInput
-                v-model="apiKey"
-                type="password"
-                :label="$t('settings.pages.modules.memory-short-term.fields.apiKey.label')"
-                :description="$t('settings.pages.modules.memory-short-term.fields.apiKey.description')"
-                :placeholder="$t('settings.pages.modules.memory-short-term.fields.apiKey.placeholder')"
-              />
-            </template>
+              <p :class="['mt-1']">
+                {{ $t('settings.pages.modules.memory-short-term.fields.managedBaseUrl.description') }}
+              </p>
+              <div :class="['mt-2 font-mono text-xs']">
+                {{ store.activeBaseUrl }}
+              </div>
+            </div>
 
             <FieldInput
               v-model="userId"

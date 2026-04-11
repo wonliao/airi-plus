@@ -156,10 +156,9 @@ async function createWikiFixture() {
   return root
 }
 
-function createRemoteMem0ValidationPayload(overrides: Partial<Parameters<typeof __memoryValidationTestUtils.validateShortTermMemory>[0]> = {}) {
+function createManagedLocalMem0ValidationPayload(overrides: Partial<Parameters<typeof __memoryValidationTestUtils.validateShortTermMemory>[0]> = {}) {
   return {
-    apiKey: 'test-key',
-    baseUrl: 'http://127.0.0.1:8000',
+    openAIApiKey: 'test-openai-key',
     userId: 'ben',
     topK: 5,
     searchThreshold: 0.6,
@@ -167,18 +166,17 @@ function createRemoteMem0ValidationPayload(overrides: Partial<Parameters<typeof 
   }
 }
 
-function createRemoteMem0ScopePayload(overrides: Record<string, unknown> = {}) {
+function createManagedLocalMem0ScopePayload(overrides: Record<string, unknown> = {}) {
   return {
-    apiKey: 'test-key',
-    baseUrl: 'http://127.0.0.1:8000',
+    openAIApiKey: 'test-openai-key',
     userId: 'ben',
     ...overrides,
   }
 }
 
-async function ensureRemoteMem0Validated() {
+async function ensureManagedLocalMem0Validated() {
   const validation = await __memoryValidationTestUtils.validateShortTermMemory(
-    createRemoteMem0ValidationPayload(),
+    createManagedLocalMem0ValidationPayload(),
   )
 
   expect(validation.valid).toBe(true)
@@ -322,20 +320,20 @@ describe('llm-wiki workspace alias', () => {
 })
 
 describe('short-term memory desktop runtime', () => {
-  it('validates the remote Mem0 Docker endpoint', async () => {
+  it('validates the AIRI-managed local Mem0 sidecar endpoint', async () => {
     const validation = await __memoryValidationTestUtils.validateShortTermMemory(
-      createRemoteMem0ValidationPayload(),
+      createManagedLocalMem0ValidationPayload(),
     )
 
     expect(validation.valid).toBe(true)
-    expect(validation.validatedBaseUrl).toBe('http://127.0.0.1:8000')
+    expect(validation.validatedBaseUrl).toBe('http://127.0.0.1:4310')
   })
 
-  it('captures, lists, searches, and clears memories through the remote API', async () => {
-    await ensureRemoteMem0Validated()
+  it('captures, lists, searches, and clears memories through the sidecar HTTP API', async () => {
+    await ensureManagedLocalMem0Validated()
 
     const capture = await __memoryValidationTestUtils.captureShortTermMemory({
-      ...createRemoteMem0ScopePayload(),
+      ...createManagedLocalMem0ScopePayload(),
       messages: [
         { role: 'user', content: 'Remember that my favorite fruit is mango.' },
       ],
@@ -345,7 +343,7 @@ describe('short-term memory desktop runtime', () => {
     expect(capture.items[0]?.memory).toContain('favorite fruit is mango')
 
     const listed = await __memoryValidationTestUtils.listShortTermMemory({
-      ...createRemoteMem0ScopePayload(),
+      ...createManagedLocalMem0ScopePayload(),
       limit: 10,
     })
 
@@ -353,7 +351,7 @@ describe('short-term memory desktop runtime', () => {
     expect(listed.items).toHaveLength(1)
 
     const search = await __memoryValidationTestUtils.searchShortTermMemory({
-      ...createRemoteMem0ScopePayload(),
+      ...createManagedLocalMem0ScopePayload(),
       query: 'mango',
       topK: 5,
       searchThreshold: 0.6,
@@ -363,21 +361,21 @@ describe('short-term memory desktop runtime', () => {
     expect(search.items[0]?.memory).toContain('mango')
 
     const clearResult = await __memoryValidationTestUtils.clearShortTermMemory({
-      ...createRemoteMem0ScopePayload(),
+      ...createManagedLocalMem0ScopePayload(),
     })
 
     expect(clearResult.ok).toBe(true)
     expect(clearResult.deletedCount).toBe(1)
 
     const afterClear = await __memoryValidationTestUtils.listShortTermMemory({
-      ...createRemoteMem0ScopePayload(),
+      ...createManagedLocalMem0ScopePayload(),
       limit: 10,
     })
 
     expect(afterClear.items).toHaveLength(0)
   })
 
-  it('canonicalizes exact duplicate remote memories into a single item', async () => {
+  it('canonicalizes exact duplicate sidecar memories into a single item', async () => {
     mockRemoteMem0Store.push(
       {
         createdAt: '2026-04-11T10:00:00.000Z',
@@ -394,7 +392,7 @@ describe('short-term memory desktop runtime', () => {
     )
 
     const listed = await __memoryValidationTestUtils.listShortTermMemory({
-      ...createRemoteMem0ScopePayload({
+      ...createManagedLocalMem0ScopePayload({
         userId: 'local',
       }),
       limit: 10,

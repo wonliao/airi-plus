@@ -25,7 +25,7 @@ import type { BrowserWindow, UtilityProcess } from 'electron'
 import process from 'node:process'
 
 import { constants } from 'node:fs'
-import { access, copyFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
+import { access, copyFile, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 
@@ -155,15 +155,25 @@ interface RemoteMem0CaptureItem {
   previousMemory?: unknown
 }
 
-const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
+interface InternalMem0ConnectionPayload {
+  apiKey: string
+  baseUrl: string
+  openAIApiKey: string
+  userId: string
+  agentId?: string
+  runId?: string
+  appId?: string
+}
+
 const electronManagedLocalMem0BaseUrl = 'http://127.0.0.1:4310'
 const electronManagedLocalMem0Port = 4310
 const mem0SidecarStartupTimeoutMsec = 15_000
+const mem0SidecarStartupLockTimeoutMsec = 15_000
 const trailingSlashPattern = /\/+$/u
 
 function normalizeRemoteMem0BaseUrl(value: string) {
   const trimmed = value.trim().replace(trailingSlashPattern, '')
-  return trimmed || mem0DefaultBaseUrl
+  return trimmed || electronManagedLocalMem0BaseUrl
 }
 
 function createRemoteMem0Headers(apiKey: string, contentType?: string) {
@@ -174,29 +184,28 @@ function createRemoteMem0Headers(apiKey: string, contentType?: string) {
   }
 }
 
-function isElectronManagedLocalMem0Mode(payload: {
-  deploymentMode?: 'electron-managed-local' | 'remote'
-}) {
-  return payload.deploymentMode === 'electron-managed-local'
-}
-
 interface ManagedLocalMem0SidecarState {
   configSignature: string
-  process: UtilityProcess
+  process?: UtilityProcess
 }
 
 let managedLocalMem0SidecarState: ManagedLocalMem0SidecarState | null = null
 let managedLocalMem0ShutdownInstalled = false
+let managedLocalMem0StartupPromise: Promise<string> | null = null
 
 function getManagedLocalMem0DataDir() {
   return joinUserDataPath('mem0-sidecar')
+}
+
+function getManagedLocalMem0StartupLockPath() {
+  return joinUserDataPath('mem0-sidecar-startup.lock')
 }
 
 async function stopManagedLocalMem0Sidecar() {
   const current = managedLocalMem0SidecarState
   managedLocalMem0SidecarState = null
 
-  if (!current || current.process.pid == null) {
+  if (!current?.process || current.process.pid == null) {
     return
   }
 
@@ -255,78 +264,165 @@ async function waitForManagedLocalMem0SidecarReady() {
   throw new Error('Timed out while starting the AIRI-managed local Mem0 sidecar.')
 }
 
+async function isManagedLocalMem0SidecarReachable() {
+  try {
+    const response = await fetch(new URL('/healthz', `${electronManagedLocalMem0BaseUrl}/`))
+    return response.ok
+  }
+  catch {
+    return false
+  }
+}
+
+async function acquireManagedLocalMem0StartupLock() {
+  const deadline = Date.now() + mem0SidecarStartupLockTimeoutMsec
+  const lockPath = getManagedLocalMem0StartupLockPath()
+
+  while (Date.now() < deadline) {
+    try {
+      await mkdir(lockPath)
+      return true
+    }
+    catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: string }).code) : ''
+      if (code !== 'EEXIST') {
+        throw error
+      }
+
+      if (await isManagedLocalMem0SidecarReachable()) {
+        return false
+      }
+
+      await delay(200)
+    }
+  }
+
+  throw new Error('Timed out while waiting for the AIRI-managed local Mem0 sidecar startup lock.')
+}
+
+async function releaseManagedLocalMem0StartupLock() {
+  try {
+    await rm(getManagedLocalMem0StartupLockPath(), { force: true, recursive: true })
+  }
+  catch {
+    // Ignore lock cleanup failures.
+  }
+}
+
 async function ensureManagedLocalMem0Sidecar(payload: {
-  openAIApiKey?: string
+  openAIApiKey: string
 }) {
   const openAIApiKey = payload.openAIApiKey?.trim() ?? ''
   if (!openAIApiKey) {
     throw new Error('OpenAI API key is required before AIRI-managed local Mem0 can be used.')
   }
 
+  if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+    return electronManagedLocalMem0BaseUrl
+  }
+
   const configSignature = JSON.stringify({
     openAIApiKey,
   })
+
+  if (managedLocalMem0StartupPromise) {
+    return managedLocalMem0StartupPromise
+  }
 
   if (managedLocalMem0SidecarState?.configSignature === configSignature) {
     return electronManagedLocalMem0BaseUrl
   }
 
-  await stopManagedLocalMem0Sidecar()
-  await mkdir(getManagedLocalMem0DataDir(), { recursive: true })
-
-  const sidecarScriptPath = await resolveMem0SidecarScriptPath()
-  let startupFailure: string | null = null
-
-  const child = utilityProcess.fork(sidecarScriptPath, [], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      AIRI_MEM0_SIDECAR_DATA_DIR: getManagedLocalMem0DataDir(),
-      AIRI_MEM0_SIDECAR_EMBEDDER_MODEL: 'text-embedding-3-small',
-      AIRI_MEM0_SIDECAR_LLM_MODEL: 'gpt-4.1-mini',
-      AIRI_MEM0_SIDECAR_PORT: String(electronManagedLocalMem0Port),
-      OPENAI_API_KEY: openAIApiKey,
-    },
-    serviceName: 'AIRI Mem0 Sidecar',
-    stdio: 'pipe',
-  })
-
-  child.stdout?.on('data', (chunk) => {
-    console.info(`[mem0-sidecar] ${String(chunk).trimEnd()}`)
-  })
-  child.stderr?.on('data', (chunk) => {
-    const text = String(chunk).trim()
-    if (text) {
-      startupFailure = startupFailure ? `${startupFailure}\n${text}` : text
-      console.warn(`[mem0-sidecar] ${text}`)
+  if (await isManagedLocalMem0SidecarReachable()) {
+    managedLocalMem0SidecarState = {
+      configSignature,
     }
-  })
-  child.once('exit', (code) => {
-    if (code !== 0) {
-      const detail = `mem0 sidecar exited before ready (code=${code ?? 'null'})`
-      startupFailure = startupFailure ? `${startupFailure}\n${detail}` : detail
-    }
-  })
-
-  managedLocalMem0SidecarState = {
-    configSignature,
-    process: child,
-  }
-
-  if (!managedLocalMem0ShutdownInstalled) {
-    managedLocalMem0ShutdownInstalled = true
-    app.once('before-quit', () => {
-      void stopManagedLocalMem0Sidecar()
-    })
-  }
-
-  try {
-    await waitForManagedLocalMem0SidecarReady()
     return electronManagedLocalMem0BaseUrl
   }
-  catch (error) {
+
+  managedLocalMem0StartupPromise = (async () => {
+    const ownsStartupLock = await acquireManagedLocalMem0StartupLock()
+    if (!ownsStartupLock) {
+      managedLocalMem0SidecarState = {
+        configSignature,
+      }
+      return electronManagedLocalMem0BaseUrl
+    }
+
     await stopManagedLocalMem0Sidecar()
-    throw new Error(startupFailure || errorMessageFrom(error) || 'Failed to start the AIRI-managed local Mem0 sidecar.')
+    await mkdir(getManagedLocalMem0DataDir(), { recursive: true })
+
+    const sidecarScriptPath = await resolveMem0SidecarScriptPath()
+    let startupFailure: string | null = null
+
+    const child = utilityProcess.fork(sidecarScriptPath, [], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        AIRI_MEM0_SIDECAR_DATA_DIR: getManagedLocalMem0DataDir(),
+        AIRI_MEM0_SIDECAR_EMBEDDER_MODEL: 'text-embedding-3-small',
+        AIRI_MEM0_SIDECAR_LLM_MODEL: 'gpt-4.1-mini',
+        AIRI_MEM0_SIDECAR_PORT: String(electronManagedLocalMem0Port),
+        OPENAI_API_KEY: openAIApiKey,
+      },
+      serviceName: 'AIRI Mem0 Sidecar',
+      stdio: 'pipe',
+    })
+
+    child.stdout?.on('data', (chunk) => {
+      console.info(`[mem0-sidecar] ${String(chunk).trimEnd()}`)
+    })
+    child.stderr?.on('data', (chunk) => {
+      const text = String(chunk).trim()
+      if (text) {
+        startupFailure = startupFailure ? `${startupFailure}\n${text}` : text
+        console.warn(`[mem0-sidecar] ${text}`)
+      }
+    })
+    child.once('exit', (code) => {
+      if (code !== 0) {
+        const detail = `mem0 sidecar exited before ready (code=${code ?? 'null'})`
+        startupFailure = startupFailure ? `${startupFailure}\n${detail}` : detail
+      }
+    })
+
+    managedLocalMem0SidecarState = {
+      configSignature,
+      process: child,
+    }
+
+    if (!managedLocalMem0ShutdownInstalled) {
+      managedLocalMem0ShutdownInstalled = true
+      app.once('before-quit', () => {
+        void stopManagedLocalMem0Sidecar()
+      })
+    }
+
+    try {
+      await waitForManagedLocalMem0SidecarReady()
+      return electronManagedLocalMem0BaseUrl
+    }
+    catch (error) {
+      if (startupFailure?.includes('EADDRINUSE') && await isManagedLocalMem0SidecarReachable()) {
+        managedLocalMem0SidecarState = {
+          configSignature,
+        }
+        return electronManagedLocalMem0BaseUrl
+      }
+
+      await stopManagedLocalMem0Sidecar()
+      throw new Error(startupFailure || errorMessageFrom(error) || 'Failed to start the AIRI-managed local Mem0 sidecar.')
+    }
+    finally {
+      await releaseManagedLocalMem0StartupLock()
+    }
+  })()
+
+  try {
+    return await managedLocalMem0StartupPromise
+  }
+  finally {
+    managedLocalMem0StartupPromise = null
   }
 }
 
@@ -369,15 +465,8 @@ function buildRemoteMem0ListQuery(payload: {
 }
 
 async function resolveShortTermMemoryConnectionPayload<T extends {
-  apiKey: string
-  baseUrl: string
-  deploymentMode?: 'electron-managed-local' | 'remote'
-  openAIApiKey?: string
-}>(payload: T): Promise<T> {
-  if (!isElectronManagedLocalMem0Mode(payload)) {
-    return payload
-  }
-
+  openAIApiKey: string
+}>(payload: T): Promise<T & { apiKey: string, baseUrl: string }> {
   const sidecarBaseUrl = await ensureManagedLocalMem0Sidecar({
     openAIApiKey: payload.openAIApiKey,
   })
@@ -554,7 +643,7 @@ function assertRemoteMem0ResponseOk(response: Response, payload: unknown, fallba
   throw new Error(readRemoteMem0Message(payload, `${fallback} (${response.status})`))
 }
 
-async function listRemoteMem0Memories(payload: ShortTermMemoryListPayload) {
+async function listRemoteMem0Memories(payload: InternalMem0ConnectionPayload & { limit?: number }) {
   const url = new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`)
   url.search = buildRemoteMem0ListQuery(payload).toString()
 
@@ -585,7 +674,7 @@ async function deleteRemoteMem0MemoryById(params: {
   assertRemoteMem0ResponseOk(response, responsePayload, `Remote Mem0 delete failed for memory ${params.memoryId}.`)
 }
 
-async function canonicalizeRemoteMem0Memories(payload: ShortTermMemoryListPayload) {
+async function canonicalizeRemoteMem0Memories(payload: InternalMem0ConnectionPayload & { limit?: number }) {
   const rawItems = await listRemoteMem0Memories(payload)
   const dedupedItems = dedupeShortTermMemoryItems(rawItems)
 
@@ -1106,18 +1195,10 @@ async function validateShortTermMemory(
     }
   }
 
-  if (isElectronManagedLocalMem0Mode(payload) && !payload.openAIApiKey?.trim()) {
+  if (!payload.openAIApiKey.trim()) {
     return {
       valid: false,
       message: 'OpenAI API key is required before AIRI-managed local Mem0 can be used.',
-      validatedBaseUrl: '',
-    }
-  }
-
-  if (!isElectronManagedLocalMem0Mode(payload) && !payload.baseUrl.trim()) {
-    return {
-      valid: false,
-      message: 'Base URL is required before remote Mem0 can be used.',
       validatedBaseUrl: '',
     }
   }
@@ -1158,16 +1239,14 @@ async function validateShortTermMemory(
 
     return {
       valid: true,
-      message: isElectronManagedLocalMem0Mode(payload)
-        ? `AIRI-managed local Mem0 sidecar is reachable at ${validatedBaseUrl}.`
-        : `Remote Mem0 API is reachable at ${validatedBaseUrl}.`,
+      message: `AIRI-managed local Mem0 sidecar is reachable at ${validatedBaseUrl}.`,
       validatedBaseUrl,
     }
   }
   catch (error) {
     return {
       valid: false,
-      message: errorMessageFrom(error) ?? 'Remote Mem0 validation failed.',
+      message: errorMessageFrom(error) ?? 'AIRI-managed local Mem0 validation failed.',
       validatedBaseUrl: '',
     }
   }
@@ -1266,6 +1345,7 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
       apiKey: connectionPayload.apiKey,
       appId: connectionPayload.appId,
       baseUrl: connectionPayload.baseUrl,
+      openAIApiKey: connectionPayload.openAIApiKey,
       userId: connectionPayload.userId.trim(),
       agentId: connectionPayload.agentId,
       limit: 8,
@@ -1357,6 +1437,7 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
       apiKey: connectionPayload.apiKey,
       appId: connectionPayload.appId,
       baseUrl: connectionPayload.baseUrl,
+      openAIApiKey: connectionPayload.openAIApiKey,
       userId: connectionPayload.userId.trim(),
       agentId: connectionPayload.agentId,
       limit: 8,

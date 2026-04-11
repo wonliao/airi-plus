@@ -479,25 +479,14 @@ pages:
       sections:
         configuration:
           title: 短期記憶設定
-          description: 設定 AIRI 連到遠端 Mem0 Docker API 所需的短期記憶範圍與連線資訊。
+          description: 設定 AIRI 代管的本機 Mem0 sidecar 與短期記憶範圍。
         remote:
-          title: Remote Mem0 連線
-          description: AIRI 可以連你自己管理的 remote Mem0 API，或改用 AIRI 在這台 Mac 上代管的本機 Mem0 sidecar；兩者都維持同一套 HTTP 心智。
+          title: 本機 Mem0 sidecar
+          description: AIRI 會在這台 Mac 上啟動並管理本機 Mem0 sidecar，然後透過 HTTP 與它互動。
       fields:
         enabled:
           label: 啟用短期記憶
-          description: 允許 AIRI 透過設定好的 remote Mem0 API 保存與檢索短期記憶。
-        useManagedLocal:
-          label: 使用 AIRI 代管的本機 Mem0 服務
-          description: 讓 AIRI 在這台 Mac 上啟動並管理本機 Mem0 sidecar。AIRI 自己仍然是透過 HTTP 與它互動的 client。
-        baseUrl:
-          label: Base URL
-          description: Mem0 Docker API 的基礎 URL。AIRI 會直接透過 HTTP 呼叫這個服務。
-          placeholder: 例如 http://127.0.0.1:8000
-        apiKey:
-          label: API 金鑰
-          description: 可選。若 Mem0 Docker 啟用了 `ADMIN_API_KEY`，AIRI 會以 `X-API-Key` 送出這個值。
-          placeholder: 輸入 Mem0 API 金鑰
+          description: 允許 AIRI 透過 AIRI 代管的本機 Mem0 sidecar 保存與檢索短期記憶。
         openAIApiKey:
           label: OpenAI API 金鑰
           description: AIRI 代管的本機 Mem0 sidecar 必填。sidecar 會用 OpenAI 做記憶抽取與 embeddings。
@@ -507,7 +496,7 @@ pages:
           description: 這個本機 Mem0 sidecar endpoint 會由 AIRI 自動選擇與管理。
         userId:
           label: User ID
-          description: 遠端 Mem0 請求使用的主要記憶範圍識別。
+          description: Mem0 請求使用的主要記憶範圍識別。
           placeholder: 例如 ben
         agentId:
           label: Agent ID
@@ -523,10 +512,10 @@ pages:
           placeholder: airi-desktop
         autoRecall:
           label: 自動 recall
-          description: 在 AIRI 回答前，自動從 remote Mem0 查詢相關短期記憶。
+          description: 在 AIRI 回答前，自動從 AIRI 代管的本機 Mem0 sidecar 查詢相關短期記憶。
         autoCapture:
           label: 自動 capture
-          description: 自動把對話回合送到 remote Mem0，交由它抽取可保留的記憶。
+          description: 自動把對話回合送到 AIRI 代管的本機 Mem0 sidecar，交由它抽取可保留的記憶。
         topK:
           label: Top K
           description: 單次查詢最多取回的記憶項目數量。
@@ -534,24 +523,24 @@ pages:
           label: 搜尋閾值
           description: 短期記憶檢索時使用的最低相似度門檻。
       notes:
-        title: 僅支援 Remote Mem0
-        content: AIRI 仍然透過 HTTP 使用 Mem0。你可以連到自己管理的 Docker Mem0，也可以讓 AIRI 代管一個使用 OpenAI 的本機 Mem0 sidecar。
+        title: AIRI 代管 sidecar
+        content: AIRI 的短期記憶現在固定使用本機 Mem0 sidecar。sidecar 由 AIRI 啟動與管理，而 AIRI app 本身仍然是透過 HTTP 與它互動。
       captureTips:
         title: 如何讓記憶更容易留下來
-        content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。AIRI 會把這一輪對話送到 remote Mem0，由它決定哪些資訊值得保留並在後續相關 query 時檢索回來。
+        content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。AIRI 會把這一輪對話送到本機 Mem0 sidecar，由它決定哪些資訊值得保留並在後續相關 query 時檢索回來。
         example1: 例如：請記住，我最喜歡的水果是芒果。
         example2: 例如：記住，我叫 Ben。
         example3: 例如：記住，我偏好精確的設定步驟。
       actions:
         clear:
           title: 清理短期記憶
-          description: 清空目前範圍在 remote Mem0 backend 中的短期記憶項目。
+          description: 清空目前範圍在 AIRI 代管本機 Mem0 sidecar 中的短期記憶項目。
           button: 清理短期記憶
           clearing: 清理中...
           success: 已清理短期記憶。
       debug:
         title: Runtime 偵錯
-        description: 用這個面板直接確認 AIRI 最近有沒有把 capture 送到 remote Mem0，以及短期記憶 recall 實際查了什麼。
+        description: 用這個面板直接確認 AIRI 最近有沒有把 capture 送到本機 Mem0 sidecar，以及短期記憶 recall 實際查了什麼。
         lastCapture: 最近一次 capture
         lastRecall: 最近一次 recall
         timestamp: 時間
