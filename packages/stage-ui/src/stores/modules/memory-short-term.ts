@@ -15,6 +15,7 @@ import { computed, ref } from 'vue'
 
 const shortTermMemoryClearTimeoutMsec = 5_000
 const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
+const managedLocalMem0BaseUrl = 'http://127.0.0.1:4310'
 const legacySearchThresholdDefault = 0.6
 const remoteSearchThresholdDefault = 0.45
 const cjkQueryPattern = /[\u3400-\u9FFF\uF900-\uFAFF]/u
@@ -78,6 +79,8 @@ interface Mem0CaptureResult {
 interface ShortTermMemoryListLikePayload {
   apiKey: string
   baseUrl: string
+  deploymentMode?: 'electron-managed-local' | 'remote'
+  openAIApiKey?: string
   userId: string
   agentId?: string
   runId?: string
@@ -418,7 +421,9 @@ const defaultShortTermMemorySettings = {
   autoCapture: true,
   autoRecall: true,
   baseUrl: mem0DefaultBaseUrl,
+  deploymentMode: 'remote' as const,
   enabled: true,
+  openAIApiKey: '',
   runId: '',
   searchThreshold: remoteSearchThresholdDefault,
   topK: 5,
@@ -432,6 +437,8 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   const baseUrl = useLocalStorageManualReset<string>('settings/memory/short-term/base-url', defaultShortTermMemorySettings.baseUrl)
   const apiKey = useLocalStorageManualReset<string>('settings/memory/short-term/api-key', defaultShortTermMemorySettings.apiKey)
+  const deploymentMode = useLocalStorageManualReset<'electron-managed-local' | 'remote'>('settings/memory/short-term/deployment-mode', defaultShortTermMemorySettings.deploymentMode)
+  const openAIApiKey = useLocalStorageManualReset<string>('settings/memory/short-term/openai-api-key', defaultShortTermMemorySettings.openAIApiKey)
   const userId = useLocalStorageManualReset<string>('settings/memory/short-term/user-id', defaultShortTermMemorySettings.userId)
   const agentId = useLocalStorageManualReset<string>('settings/memory/short-term/agent-id', defaultShortTermMemorySettings.agentId)
   const runId = useLocalStorageManualReset<string>('settings/memory/short-term/run-id', defaultShortTermMemorySettings.runId)
@@ -472,7 +479,11 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
   }
 
   const backendId = computed(() => 'remote-mem0')
-  const configured = computed(() => enabled.value && !!userId.value.trim() && !!baseUrl.value.trim())
+  const isManagedLocal = computed(() => deploymentMode.value === 'electron-managed-local')
+  const activeBaseUrl = computed(() => isManagedLocal.value ? managedLocalMem0BaseUrl : baseUrl.value.trim())
+  const configured = computed(() => enabled.value
+    && !!userId.value.trim()
+    && (isManagedLocal.value ? !!openAIApiKey.value.trim() : !!baseUrl.value.trim()))
   const runtimeReady = computed(() => enabled.value && configured.value && validationStatus.value === 'success')
 
   function setCaptureDebug(entry: Mem0RuntimeDebugEntry) {
@@ -496,7 +507,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     const payload = {
       apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: baseUrl.value.trim(),
+      baseUrl: activeBaseUrl.value,
+      deploymentMode: deploymentMode.value,
+      openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
       limit: 8,
@@ -557,7 +570,13 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
       return { message: lastValidation.value, valid: false }
     }
 
-    if (!baseUrl.value.trim()) {
+    if (isManagedLocal.value && !openAIApiKey.value.trim()) {
+      validationStatus.value = 'error'
+      lastValidation.value = 'OpenAI API key is required before AIRI-managed local Mem0 can be used.'
+      return { message: lastValidation.value, valid: false }
+    }
+
+    if (!isManagedLocal.value && !baseUrl.value.trim()) {
       validationStatus.value = 'error'
       lastValidation.value = 'Base URL is required before remote Mem0 can be used.'
       return { message: lastValidation.value, valid: false }
@@ -578,7 +597,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     try {
       const payload = {
         apiKey: apiKey.value.trim(),
-        baseUrl: baseUrl.value.trim(),
+        baseUrl: activeBaseUrl.value,
+        deploymentMode: deploymentMode.value,
+        openAIApiKey: openAIApiKey.value.trim(),
         userId: userId.value.trim(),
         agentId: agentId.value.trim(),
         runId: runId.value.trim(),
@@ -625,7 +646,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     const payload = {
       apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: baseUrl.value.trim(),
+      baseUrl: activeBaseUrl.value,
+      deploymentMode: deploymentMode.value,
+      openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
       query: trimmedQuery,
@@ -724,7 +747,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     const payload = {
       apiKey: apiKey.value.trim(),
       appId: appId.value.trim(),
-      baseUrl: baseUrl.value.trim(),
+      baseUrl: activeBaseUrl.value,
+      deploymentMode: deploymentMode.value,
+      openAIApiKey: openAIApiKey.value.trim(),
       userId: userId.value.trim(),
       agentId: agentId.value.trim(),
       messages: usableMessages,
@@ -801,7 +826,9 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     try {
       const payload = {
         apiKey: apiKey.value.trim(),
-        baseUrl: baseUrl.value.trim(),
+        baseUrl: activeBaseUrl.value,
+        deploymentMode: deploymentMode.value,
+        openAIApiKey: openAIApiKey.value.trim(),
         userId: userId.value.trim(),
         agentId: agentId.value.trim(),
         runId: runId.value.trim(),
@@ -878,6 +905,8 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     enabled.reset()
     baseUrl.reset()
     apiKey.reset()
+    deploymentMode.reset()
+    openAIApiKey.reset()
     userId.reset()
     agentId.reset()
     runId.reset()
@@ -896,6 +925,7 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     apiKey,
     appId,
     agentId,
+    activeBaseUrl,
     autoCapture,
     autoRecall,
     backendId,
@@ -904,12 +934,15 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
     captureMessages,
     clearShortTermMemory,
     configured,
+    deploymentMode,
     enabled,
+    isManagedLocal,
     isClearing,
     lastCaptureDebug,
     lastRecallDebug,
     lastValidation,
     markRecallSkipped,
+    openAIApiKey,
     resetState,
     resetValidationState,
     runId,

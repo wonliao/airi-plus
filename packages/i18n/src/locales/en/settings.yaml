@@ -521,11 +521,14 @@ pages:
           description: Configure AIRI as a client of your remote Mem0 Docker API.
         remote:
           title: Remote Mem0 connection
-          description: AIRI only talks to an external Mem0 HTTP API. The short-term memory backend no longer runs inside Electron.
+          description: AIRI can talk to either your own remote Mem0 API or an AIRI-managed local Mem0 sidecar that still exposes the same HTTP shape.
       fields:
         enabled:
           label: Enable short-term memory
           description: Allow AIRI to capture and recall short-term memory through the configured remote Mem0 API.
+        useManagedLocal:
+          label: Use AIRI-managed local Mem0 service
+          description: Let AIRI start and manage a local Mem0 sidecar on this Mac. AIRI will still talk to it over HTTP as a Mem0 client.
         baseUrl:
           label: Base URL
           description: Base URL of the Mem0 Docker API. AIRI will call this service over HTTP.
@@ -534,6 +537,13 @@ pages:
           label: API key
           description: Optional `X-API-Key` header for Mem0 Docker when `ADMIN_API_KEY` is enabled.
           placeholder: Enter the Mem0 API key
+        openAIApiKey:
+          label: OpenAI API key
+          description: Required for the AIRI-managed local Mem0 sidecar. The sidecar uses OpenAI for memory extraction and embeddings.
+          placeholder: Enter your OpenAI API key
+        managedBaseUrl:
+          label: Managed local base URL
+          description: AIRI chooses and manages this local Mem0 sidecar endpoint automatically.
         userId:
           label: User ID
           description: Primary memory scope identifier used in remote Mem0 requests.
@@ -564,7 +574,7 @@ pages:
           description: Minimum similarity threshold used by short-term memory retrieval.
       notes:
         title: Remote Mem0 only
-        content: AIRI no longer runs a local Mem0 runtime. Configure your Docker-hosted Mem0 server here, and let that service own provider, embedding, and storage setup.
+        content: AIRI still uses Mem0 through an HTTP API. You can point it at your own Docker-hosted Mem0 service, or let AIRI manage a local OpenAI-backed Mem0 sidecar for you.
       captureTips:
         title: How to make memory stick
         content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. AIRI forwards the conversation turn to remote Mem0, which decides what durable memory to keep.

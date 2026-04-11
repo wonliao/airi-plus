@@ -20,11 +20,14 @@ import type {
   ShortTermMemoryValidationPayload,
   ShortTermMemoryValidationResult,
 } from '@proj-airi/stage-shared'
-import type { BrowserWindow } from 'electron'
+import type { BrowserWindow, UtilityProcess } from 'electron'
+
+import process from 'node:process'
 
 import { constants } from 'node:fs'
 import { access, copyFile, mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, sep } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import { defineInvokeHandler } from '@moeru/eventa'
 import { errorMessageFrom } from '@moeru/std'
@@ -41,7 +44,7 @@ import {
   isElectronManagedMemoryAlias,
   isElectronManagedRelativePath,
 } from '@proj-airi/stage-shared'
-import { app } from 'electron'
+import { app, utilityProcess } from 'electron'
 
 function ensureTrailingSeparator(value: string) {
   return value.endsWith(sep) ? value : `${value}${sep}`
@@ -153,8 +156,13 @@ interface RemoteMem0CaptureItem {
 }
 
 const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
+const electronManagedLocalMem0BaseUrl = 'http://127.0.0.1:4310'
+const electronManagedLocalMem0Port = 4310
+const mem0SidecarStartupTimeoutMsec = 15_000
+const trailingSlashPattern = /\/+$/u
+
 function normalizeRemoteMem0BaseUrl(value: string) {
-  const trimmed = value.trim().replace(/\/+$/u, '')
+  const trimmed = value.trim().replace(trailingSlashPattern, '')
   return trimmed || mem0DefaultBaseUrl
 }
 
@@ -163,6 +171,162 @@ function createRemoteMem0Headers(apiKey: string, contentType?: string) {
     Accept: 'application/json',
     ...(contentType ? { 'Content-Type': contentType } : {}),
     ...(apiKey.trim() ? { 'X-API-Key': apiKey.trim() } : {}),
+  }
+}
+
+function isElectronManagedLocalMem0Mode(payload: {
+  deploymentMode?: 'electron-managed-local' | 'remote'
+}) {
+  return payload.deploymentMode === 'electron-managed-local'
+}
+
+interface ManagedLocalMem0SidecarState {
+  configSignature: string
+  process: UtilityProcess
+}
+
+let managedLocalMem0SidecarState: ManagedLocalMem0SidecarState | null = null
+let managedLocalMem0ShutdownInstalled = false
+
+function getManagedLocalMem0DataDir() {
+  return joinUserDataPath('mem0-sidecar')
+}
+
+async function stopManagedLocalMem0Sidecar() {
+  const current = managedLocalMem0SidecarState
+  managedLocalMem0SidecarState = null
+
+  if (!current || current.process.pid == null) {
+    return
+  }
+
+  current.process.kill()
+  await Promise.race([
+    new Promise<void>((resolvePromise) => {
+      current.process.once('exit', () => resolvePromise())
+    }),
+    delay(2_000).then(() => {
+      if (current.process.pid != null) {
+        current.process.kill()
+      }
+    }),
+  ])
+}
+
+async function resolveMem0SidecarScriptPath() {
+  const candidates = [
+    resolve(import.meta.dirname, 'mem0-sidecar.js'),
+    resolve(import.meta.dirname, '../mem0-sidecar.js'),
+    resolve(import.meta.dirname, '../../../mem0-sidecar.js'),
+    resolve(app.getAppPath(), 'out', 'main', 'mem0-sidecar.js'),
+    resolve(process.cwd(), 'apps', 'stage-tamagotchi', 'out', 'main', 'mem0-sidecar.js'),
+  ]
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate, constants.R_OK)
+      return candidate
+    }
+    catch {
+      // Try the next candidate.
+    }
+  }
+
+  throw new Error(`Unable to locate mem0-sidecar.js. Tried: ${candidates.join(', ')}`)
+}
+
+async function waitForManagedLocalMem0SidecarReady() {
+  const deadline = Date.now() + mem0SidecarStartupTimeoutMsec
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL('/healthz', `${electronManagedLocalMem0BaseUrl}/`))
+      if (response.ok) {
+        return
+      }
+    }
+    catch {
+      // Keep polling until the sidecar is ready or the timeout expires.
+    }
+
+    await delay(250)
+  }
+
+  throw new Error('Timed out while starting the AIRI-managed local Mem0 sidecar.')
+}
+
+async function ensureManagedLocalMem0Sidecar(payload: {
+  openAIApiKey?: string
+}) {
+  const openAIApiKey = payload.openAIApiKey?.trim() ?? ''
+  if (!openAIApiKey) {
+    throw new Error('OpenAI API key is required before AIRI-managed local Mem0 can be used.')
+  }
+
+  const configSignature = JSON.stringify({
+    openAIApiKey,
+  })
+
+  if (managedLocalMem0SidecarState?.configSignature === configSignature) {
+    return electronManagedLocalMem0BaseUrl
+  }
+
+  await stopManagedLocalMem0Sidecar()
+  await mkdir(getManagedLocalMem0DataDir(), { recursive: true })
+
+  const sidecarScriptPath = await resolveMem0SidecarScriptPath()
+  let startupFailure: string | null = null
+
+  const child = utilityProcess.fork(sidecarScriptPath, [], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      AIRI_MEM0_SIDECAR_DATA_DIR: getManagedLocalMem0DataDir(),
+      AIRI_MEM0_SIDECAR_EMBEDDER_MODEL: 'text-embedding-3-small',
+      AIRI_MEM0_SIDECAR_LLM_MODEL: 'gpt-4.1-mini',
+      AIRI_MEM0_SIDECAR_PORT: String(electronManagedLocalMem0Port),
+      OPENAI_API_KEY: openAIApiKey,
+    },
+    serviceName: 'AIRI Mem0 Sidecar',
+    stdio: 'pipe',
+  })
+
+  child.stdout?.on('data', (chunk) => {
+    console.info(`[mem0-sidecar] ${String(chunk).trimEnd()}`)
+  })
+  child.stderr?.on('data', (chunk) => {
+    const text = String(chunk).trim()
+    if (text) {
+      startupFailure = startupFailure ? `${startupFailure}\n${text}` : text
+      console.warn(`[mem0-sidecar] ${text}`)
+    }
+  })
+  child.once('exit', (code) => {
+    if (code !== 0) {
+      const detail = `mem0 sidecar exited before ready (code=${code ?? 'null'})`
+      startupFailure = startupFailure ? `${startupFailure}\n${detail}` : detail
+    }
+  })
+
+  managedLocalMem0SidecarState = {
+    configSignature,
+    process: child,
+  }
+
+  if (!managedLocalMem0ShutdownInstalled) {
+    managedLocalMem0ShutdownInstalled = true
+    app.once('before-quit', () => {
+      void stopManagedLocalMem0Sidecar()
+    })
+  }
+
+  try {
+    await waitForManagedLocalMem0SidecarReady()
+    return electronManagedLocalMem0BaseUrl
+  }
+  catch (error) {
+    await stopManagedLocalMem0Sidecar()
+    throw new Error(startupFailure || errorMessageFrom(error) || 'Failed to start the AIRI-managed local Mem0 sidecar.')
   }
 }
 
@@ -202,6 +366,27 @@ function buildRemoteMem0ListQuery(payload: {
   }
 
   return query
+}
+
+async function resolveShortTermMemoryConnectionPayload<T extends {
+  apiKey: string
+  baseUrl: string
+  deploymentMode?: 'electron-managed-local' | 'remote'
+  openAIApiKey?: string
+}>(payload: T): Promise<T> {
+  if (!isElectronManagedLocalMem0Mode(payload)) {
+    return payload
+  }
+
+  const sidecarBaseUrl = await ensureManagedLocalMem0Sidecar({
+    openAIApiKey: payload.openAIApiKey,
+  })
+
+  return {
+    ...payload,
+    apiKey: '',
+    baseUrl: sidecarBaseUrl,
+  }
 }
 
 async function parseRemoteMem0Json(response: Response) {
@@ -921,7 +1106,15 @@ async function validateShortTermMemory(
     }
   }
 
-  if (!payload.baseUrl.trim()) {
+  if (isElectronManagedLocalMem0Mode(payload) && !payload.openAIApiKey?.trim()) {
+    return {
+      valid: false,
+      message: 'OpenAI API key is required before AIRI-managed local Mem0 can be used.',
+      validatedBaseUrl: '',
+    }
+  }
+
+  if (!isElectronManagedLocalMem0Mode(payload) && !payload.baseUrl.trim()) {
     return {
       valid: false,
       message: 'Base URL is required before remote Mem0 can be used.',
@@ -946,16 +1139,17 @@ async function validateShortTermMemory(
   }
 
   try {
-    const validatedBaseUrl = normalizeRemoteMem0BaseUrl(payload.baseUrl)
+    const connectionPayload = await resolveShortTermMemoryConnectionPayload(payload)
+    const validatedBaseUrl = normalizeRemoteMem0BaseUrl(connectionPayload.baseUrl)
     const url = new URL('/memories', `${validatedBaseUrl}/`)
     url.search = buildRemoteMem0ListQuery({
-      userId: payload.userId,
-      agentId: payload.agentId,
-      runId: payload.runId,
+      userId: connectionPayload.userId,
+      agentId: connectionPayload.agentId,
+      runId: connectionPayload.runId,
       limit: 1,
     }).toString()
     const response = await fetch(url, {
-      headers: createRemoteMem0Headers(payload.apiKey),
+      headers: createRemoteMem0Headers(connectionPayload.apiKey),
       method: 'GET',
     })
     const responsePayload = await parseRemoteMem0Json(response)
@@ -964,7 +1158,9 @@ async function validateShortTermMemory(
 
     return {
       valid: true,
-      message: `Remote Mem0 API is reachable at ${validatedBaseUrl}.`,
+      message: isElectronManagedLocalMem0Mode(payload)
+        ? `AIRI-managed local Mem0 sidecar is reachable at ${validatedBaseUrl}.`
+        : `Remote Mem0 API is reachable at ${validatedBaseUrl}.`,
       validatedBaseUrl,
     }
   }
@@ -979,7 +1175,8 @@ async function validateShortTermMemory(
 
 async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise<ShortTermMemoryListResult> {
   try {
-    const items = await canonicalizeRemoteMem0Memories(payload)
+    const connectionPayload = await resolveShortTermMemoryConnectionPayload(payload)
+    const items = await canonicalizeRemoteMem0Memories(connectionPayload)
 
     return {
       ok: true,
@@ -1000,8 +1197,9 @@ async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise
 
 async function clearShortTermMemory(payload: ShortTermMemoryClearPayload): Promise<ShortTermMemoryClearResult> {
   try {
+    const connectionPayload = await resolveShortTermMemoryConnectionPayload(payload)
     const latestMemoryItems = await canonicalizeRemoteMem0Memories({
-      ...payload,
+      ...connectionPayload,
       appId: undefined,
       limit: 100,
     })
@@ -1017,15 +1215,15 @@ async function clearShortTermMemory(payload: ShortTermMemoryClearPayload): Promi
       }
     }
 
-    const url = new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`)
+    const url = new URL('/memories', `${normalizeRemoteMem0BaseUrl(connectionPayload.baseUrl)}/`)
     url.search = buildRemoteMem0ListQuery({
-      userId: payload.userId,
-      agentId: payload.agentId,
-      runId: payload.runId,
+      userId: connectionPayload.userId,
+      agentId: connectionPayload.agentId,
+      runId: connectionPayload.runId,
     }).toString()
 
     const response = await fetch(url, {
-      headers: createRemoteMem0Headers(payload.apiKey),
+      headers: createRemoteMem0Headers(connectionPayload.apiKey),
       method: 'DELETE',
     })
     const responsePayload = await parseRemoteMem0Json(response)
@@ -1063,28 +1261,29 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
   }
 
   try {
+    const connectionPayload = await resolveShortTermMemoryConnectionPayload(payload)
     const latestMemoryItems = await canonicalizeRemoteMem0Memories({
-      apiKey: payload.apiKey,
-      appId: payload.appId,
-      baseUrl: payload.baseUrl,
-      userId: payload.userId.trim(),
-      agentId: payload.agentId,
+      apiKey: connectionPayload.apiKey,
+      appId: connectionPayload.appId,
+      baseUrl: connectionPayload.baseUrl,
+      userId: connectionPayload.userId.trim(),
+      agentId: connectionPayload.agentId,
       limit: 8,
-      runId: payload.runId,
+      runId: connectionPayload.runId,
     })
     const latestMemories = latestMemoryItems.map(item => item.memory)
-    const response = await fetch(new URL('/search', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`), {
+    const response = await fetch(new URL('/search', `${normalizeRemoteMem0BaseUrl(connectionPayload.baseUrl)}/`), {
       body: JSON.stringify({
         query: trimmedQuery,
-        top_k: Math.max(1, Math.min(payload.topK, 20)),
+        top_k: Math.max(1, Math.min(connectionPayload.topK, 20)),
         ...buildRemoteMem0Scope({
-          userId: payload.userId,
-          agentId: payload.agentId,
-          runId: payload.runId,
-          appId: payload.appId,
+          userId: connectionPayload.userId,
+          agentId: connectionPayload.agentId,
+          runId: connectionPayload.runId,
+          appId: connectionPayload.appId,
         }),
       }),
-      headers: createRemoteMem0Headers(payload.apiKey, 'application/json'),
+      headers: createRemoteMem0Headers(connectionPayload.apiKey, 'application/json'),
       method: 'POST',
     })
     const responsePayload = await parseRemoteMem0Json(response)
@@ -1093,8 +1292,8 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
 
     const items = dedupeShortTermMemoryItems(
       readRemoteMem0Items(responsePayload)
-        .filter(item => typeof item.score !== 'number' || item.score >= payload.searchThreshold)
-        .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim())),
+        .filter(item => typeof item.score !== 'number' || item.score >= connectionPayload.searchThreshold)
+        .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, connectionPayload.userId.trim())),
     )
 
     return {
@@ -1128,22 +1327,23 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
   }
 
   try {
-    const response = await fetch(new URL('/memories', `${normalizeRemoteMem0BaseUrl(payload.baseUrl)}/`), {
+    const connectionPayload = await resolveShortTermMemoryConnectionPayload(payload)
+    const response = await fetch(new URL('/memories', `${normalizeRemoteMem0BaseUrl(connectionPayload.baseUrl)}/`), {
       body: JSON.stringify({
         async_mode: false,
         infer: true,
-        messages: payload.messages.map(message => ({
+        messages: connectionPayload.messages.map(message => ({
           content: message.content,
           role: message.role,
         })),
         ...buildRemoteMem0Scope({
-          userId: payload.userId,
-          agentId: payload.agentId,
-          runId: payload.runId,
-          appId: payload.appId,
+          userId: connectionPayload.userId,
+          agentId: connectionPayload.agentId,
+          runId: connectionPayload.runId,
+          appId: connectionPayload.appId,
         }),
       }),
-      headers: createRemoteMem0Headers(payload.apiKey, 'application/json'),
+      headers: createRemoteMem0Headers(connectionPayload.apiKey, 'application/json'),
       method: 'POST',
     })
     const responsePayload = await parseRemoteMem0Json(response)
@@ -1154,13 +1354,13 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
       .map(item => toShortTermCaptureResultItem(item as RemoteMem0CaptureItem))
       .filter(item => !!item.id || !!item.memory)
     const latestMemoryItems = await canonicalizeRemoteMem0Memories({
-      apiKey: payload.apiKey,
-      appId: payload.appId,
-      baseUrl: payload.baseUrl,
-      userId: payload.userId.trim(),
-      agentId: payload.agentId,
+      apiKey: connectionPayload.apiKey,
+      appId: connectionPayload.appId,
+      baseUrl: connectionPayload.baseUrl,
+      userId: connectionPayload.userId.trim(),
+      agentId: connectionPayload.agentId,
       limit: 8,
-      runId: payload.runId,
+      runId: connectionPayload.runId,
     })
 
     return {

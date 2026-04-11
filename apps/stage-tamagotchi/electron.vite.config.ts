@@ -22,6 +22,12 @@ const sharedCacheDir = resolve(join(import.meta.dirname, '..', '..', '.cache'))
 export default defineConfig({
   main: {
     build: {
+      lib: {
+        entry: {
+          'index': resolve(join(import.meta.dirname, 'src', 'main', 'index.ts')),
+          'mem0-sidecar': resolve(join(import.meta.dirname, 'src', 'main', 'services', 'airi', 'mem0-sidecar', 'entry.ts')),
+        },
+      },
       externalizeDeps: {
         include: [
           'electron-click-drag-plugin',

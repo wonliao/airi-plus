@@ -85,7 +85,6 @@ beforeEach(() => {
       }
 
       existing.memory = body.text ?? existing.memory
-      existing.createdAt = existing.createdAt
 
       return jsonResponse({
         id: existing.id,

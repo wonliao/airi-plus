@@ -482,11 +482,14 @@ pages:
           description: 設定 AIRI 連到遠端 Mem0 Docker API 所需的短期記憶範圍與連線資訊。
         remote:
           title: Remote Mem0 連線
-          description: AIRI 現在只會透過 HTTP 呼叫外部 Mem0 API，短期記憶 backend 不再跑在 Electron 內。
+          description: AIRI 可以連你自己管理的 remote Mem0 API，或改用 AIRI 在這台 Mac 上代管的本機 Mem0 sidecar；兩者都維持同一套 HTTP 心智。
       fields:
         enabled:
           label: 啟用短期記憶
           description: 允許 AIRI 透過設定好的 remote Mem0 API 保存與檢索短期記憶。
+        useManagedLocal:
+          label: 使用 AIRI 代管的本機 Mem0 服務
+          description: 讓 AIRI 在這台 Mac 上啟動並管理本機 Mem0 sidecar。AIRI 自己仍然是透過 HTTP 與它互動的 client。
         baseUrl:
           label: Base URL
           description: Mem0 Docker API 的基礎 URL。AIRI 會直接透過 HTTP 呼叫這個服務。
@@ -495,6 +498,13 @@ pages:
           label: API 金鑰
           description: 可選。若 Mem0 Docker 啟用了 `ADMIN_API_KEY`，AIRI 會以 `X-API-Key` 送出這個值。
           placeholder: 輸入 Mem0 API 金鑰
+        openAIApiKey:
+          label: OpenAI API 金鑰
+          description: AIRI 代管的本機 Mem0 sidecar 必填。sidecar 會用 OpenAI 做記憶抽取與 embeddings。
+          placeholder: 輸入你的 OpenAI API 金鑰
+        managedBaseUrl:
+          label: 代管本機 Base URL
+          description: 這個本機 Mem0 sidecar endpoint 會由 AIRI 自動選擇與管理。
         userId:
           label: User ID
           description: 遠端 Mem0 請求使用的主要記憶範圍識別。
@@ -525,7 +535,7 @@ pages:
           description: 短期記憶檢索時使用的最低相似度門檻。
       notes:
         title: 僅支援 Remote Mem0
-        content: AIRI 不再在本地執行 Mem0 runtime。請在這裡設定 Docker 裡的 Mem0 server，provider、embedding 與儲存配置都交由遠端服務負責。
+        content: AIRI 仍然透過 HTTP 使用 Mem0。你可以連到自己管理的 Docker Mem0，也可以讓 AIRI 代管一個使用 OpenAI 的本機 Mem0 sidecar。
       captureTips:
         title: 如何讓記憶更容易留下來
         content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。AIRI 會把這一輪對話送到 remote Mem0，由它決定哪些資訊值得保留並在後續相關 query 時檢索回來。
