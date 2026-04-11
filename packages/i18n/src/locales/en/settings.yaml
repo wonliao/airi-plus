@@ -1022,6 +1022,36 @@ pages:
       openai:
         description: openai.com
         title: OpenAI
+      openai-subscription:
+        description: Experimental ChatGPT subscription integration for desktop AIRI.
+        title: OpenAI Subscription
+        sign-in:
+          title: Connect your ChatGPT subscription
+          description: Sign in with the ChatGPT account that has your Plus or Pro subscription.
+          experimentalDescription: Experimental desktop integration. OpenAI may change this flow or revoke compatibility without notice.
+          action: Sign in with ChatGPT
+        comparison:
+          title: About this provider
+          api:
+            title: OpenAI API
+            description: Stable developer API with API-key billing on the OpenAI platform.
+          subscription:
+            title: ChatGPT Subscription
+            description: Experimental desktop flow that uses your ChatGPT Plus or Pro access instead of API credits.
+        ready:
+          title: Subscription connected
+          description: AIRI can now try compatible Codex models through your ChatGPT subscription session.
+          tipTitle: Before you rely on it
+          tipDescription: This route is less stable than the OpenAI API and may stop working if OpenAI changes ChatGPT or Codex internals.
+          action: Use this provider
+          logout: Disconnect
+        unsupported:
+          title: Desktop only
+          description: This experimental provider is only available in AIRI Desktop because it relies on a local browser callback flow.
+        validation:
+          check-login:
+            title: Check ChatGPT subscription login
+            reason: Sign in with your ChatGPT subscription before using this provider.
       azure-openai:
         description: Azure OpenAI API
         title: Azure OpenAI

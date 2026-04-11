@@ -42,6 +42,7 @@ import {
   pluginProtocolListProvidersEventName,
 } from '../shared/eventa'
 import { initializeElectronAuthCallbackBridge } from './bridges/electron-auth-callback'
+import { initializeElectronOpenAISubscriptionCallbackBridge } from './bridges/electron-openai-subscription-callback'
 import { initializeStageThreeRuntimeTraceBridge } from './bridges/stage-three-runtime-trace'
 import { useServerChannelSettingsStore } from './stores/settings/server-channel'
 import { useStageWindowLifecycleStore } from './stores/stage-window-lifecycle'
@@ -67,6 +68,7 @@ const context = useElectronEventaContext()
 usePerfTracerBridgeStore()
 initializeStageThreeRuntimeTraceBridge()
 initializeElectronAuthCallbackBridge()
+initializeElectronOpenAISubscriptionCallbackBridge()
 void stageWindowLifecycleStore.initializeWindowLifecycleBridge()
 const getServerChannelConfig = useElectronEventaInvoke(electronGetServerChannelConfig)
 const listPlugins = useElectronEventaInvoke(electronPluginList)

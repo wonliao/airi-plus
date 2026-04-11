@@ -973,6 +973,36 @@ pages:
       openai:
         description: OpenAi.com
         title: OpenAI
+      openai-subscription:
+        description: AIRI 桌面版专用的实验性 ChatGPT 订阅集成。
+        title: OpenAI 订阅
+        sign-in:
+          title: 连接你的 ChatGPT 订阅
+          description: 使用拥有 ChatGPT Plus 或 Pro 订阅的账号登录。
+          experimentalDescription: 这是实验性桌面集成。OpenAI 后续可能变更流程或取消兼容性，恕不另行通知。
+          action: 使用 ChatGPT 登录
+        comparison:
+          title: 关于这个提供商
+          api:
+            title: OpenAI API
+            description: 使用 API key 并在 OpenAI 平台计费的正式开发者 API。
+          subscription:
+            title: ChatGPT 订阅
+            description: 实验性桌面流程，通过 ChatGPT Plus 或 Pro 使用权而不是 API 额度。
+        ready:
+          title: 订阅已连接
+          description: AIRI 现在可以尝试通过你的 ChatGPT 订阅会话使用兼容的 Codex 模型。
+          tipTitle: 使用前请先了解
+          tipDescription: 这条路径比 OpenAI API 更不稳定；如果 OpenAI 调整 ChatGPT 或 Codex 内部行为，可能会随时失效。
+          action: 使用这个提供商
+          logout: 断开连接
+        unsupported:
+          title: 仅支持桌面版
+          description: 这个实验性提供商目前只支持 AIRI 桌面版，因为它依赖本地浏览器回调流程。
+        validation:
+          check-login:
+            title: 检查 ChatGPT 订阅登录
+            reason: 使用这个提供商前，请先登录你的 ChatGPT 订阅账号。
       azure-openai:
         description: Azure OpenAI API
         title: Azure OpenAI

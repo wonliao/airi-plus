@@ -1,4 +1,5 @@
 import './openai'
+import './openai-subscription'
 import './aihubmix'
 import './lm-studio'
 import './azure-openai'
