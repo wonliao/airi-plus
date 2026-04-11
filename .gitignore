@@ -138,3 +138,7 @@ apps/stage-tamagotchi/electron.vite.config.*.mjs
 .opencode/
 .sisyphus/
 openspec/config.yaml
+
+# Local Mem0 docker state
+mem0/.env
+mem0/data/

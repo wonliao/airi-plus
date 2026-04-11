@@ -6,7 +6,7 @@ describe('retrieval-context', () => {
   it('builds a system retrieval context message when short-term memory is present', () => {
     const message = buildRetrievalContextMessage({
       shortTermRecall: {
-        prompt: 'These are short-term memories recalled from mem0.\n1. my favorite idol is A',
+        prompt: 'These are short-term memories recalled from the configured memory backend.\n1. my favorite idol is A',
       },
     })
 
