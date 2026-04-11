@@ -937,6 +937,138 @@ export function transformCodexResponseToChatCompletionsSSE(body: string): string
   return outputLines.join('')
 }
 
+export function transformCodexResponseToChatCompletionsJson(body: string, model: string): Record<string, unknown> {
+  const toolCalls = new Map<string, {
+    arguments: string
+    id: string
+    name: string
+  }>()
+  let content = ''
+  let usage: ReturnType<typeof normalizeUsage> | undefined
+
+  for (const rawEvent of parseSSEEvents(body)) {
+    if (rawEvent.data === '[DONE]') {
+      continue
+    }
+
+    let parsed: Record<string, unknown>
+    try {
+      parsed = JSON.parse(rawEvent.data) as Record<string, unknown>
+    }
+    catch {
+      continue
+    }
+
+    const eventType = typeof parsed.type === 'string' ? parsed.type : ''
+    if (eventType === 'error') {
+      throw new Error(typeof parsed.message === 'string' ? parsed.message : JSON.stringify(parsed))
+    }
+
+    if (eventType === 'response.output_text.delta' && typeof parsed.delta === 'string') {
+      content += parsed.delta
+      continue
+    }
+
+    if (eventType === 'response.function_call_arguments.delta' && typeof parsed.delta === 'string') {
+      const key = typeof parsed.item_id === 'string'
+        ? parsed.item_id
+        : typeof parsed.call_id === 'string'
+          ? parsed.call_id
+          : undefined
+      if (!key) {
+        continue
+      }
+
+      const existing = toolCalls.get(key)
+      toolCalls.set(key, {
+        arguments: `${existing?.arguments ?? ''}${parsed.delta}`,
+        id: typeof parsed.call_id === 'string' ? parsed.call_id : existing?.id ?? key,
+        name: typeof parsed.name === 'string' ? parsed.name : existing?.name ?? 'tool_call',
+      })
+      continue
+    }
+
+    if (eventType === 'response.function_call_arguments.done') {
+      const key = typeof parsed.item_id === 'string'
+        ? parsed.item_id
+        : typeof parsed.call_id === 'string'
+          ? parsed.call_id
+          : undefined
+      if (!key) {
+        continue
+      }
+
+      toolCalls.set(key, {
+        arguments: typeof parsed.arguments === 'string' ? parsed.arguments : toolCalls.get(key)?.arguments ?? '',
+        id: typeof parsed.call_id === 'string' ? parsed.call_id : toolCalls.get(key)?.id ?? key,
+        name: typeof parsed.name === 'string' ? parsed.name : toolCalls.get(key)?.name ?? 'tool_call',
+      })
+      continue
+    }
+
+    if (eventType === 'response.output_item.done') {
+      const item = parsed.item
+      if (!item || typeof item !== 'object') {
+        continue
+      }
+
+      const record = item as Record<string, unknown>
+      if (record.type !== 'function_call') {
+        continue
+      }
+
+      const key = typeof record.id === 'string'
+        ? record.id
+        : typeof record.call_id === 'string'
+          ? record.call_id
+          : undefined
+      if (!key) {
+        continue
+      }
+
+      toolCalls.set(key, {
+        arguments: typeof record.arguments === 'string' ? record.arguments : toolCalls.get(key)?.arguments ?? '',
+        id: typeof record.call_id === 'string' ? record.call_id : toolCalls.get(key)?.id ?? key,
+        name: typeof record.name === 'string' ? record.name : toolCalls.get(key)?.name ?? 'tool_call',
+      })
+      continue
+    }
+
+    if (eventType === 'response.completed') {
+      const response = parsed.response
+      usage = response && typeof response === 'object'
+        ? normalizeUsage((response as Record<string, unknown>).usage)
+        : undefined
+    }
+  }
+
+  const finalizedToolCalls = Array.from(toolCalls.values()).map(toolCall => ({
+    id: toolCall.id,
+    type: 'function',
+    function: {
+      name: toolCall.name,
+      arguments: toolCall.arguments,
+    },
+  }))
+
+  return {
+    id: 'chatcmpl-openai-subscription',
+    object: 'chat.completion',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{
+      index: 0,
+      message: {
+        role: 'assistant',
+        content: content || '',
+        ...(finalizedToolCalls.length > 0 ? { tool_calls: finalizedToolCalls } : {}),
+      },
+      finish_reason: finalizedToolCalls.length > 0 ? 'tool_calls' : 'stop',
+    }],
+    ...(usage ? { usage } : {}),
+  }
+}
+
 async function proxyOpenAISubscriptionRequest(payload: ElectronOpenAISubscriptionProxyPayload) {
   const nextTokens = shouldRefreshOpenAISubscriptionTokens(payload.tokens)
     ? await refreshOpenAISubscriptionProxyTokens(payload.tokens)
@@ -1004,6 +1136,60 @@ async function proxyOpenAISubscriptionRequest(payload: ElectronOpenAISubscriptio
       statusText: response.statusText,
       headers: Array.from(responseHeaders.entries()),
       body: responseBody,
+    },
+    tokens: nextTokens,
+  }
+}
+
+export async function proxyOpenAISubscriptionRequestAsChatCompletionsJson(payload: ElectronOpenAISubscriptionProxyPayload & {
+  model: string
+}) {
+  const nextTokens = shouldRefreshOpenAISubscriptionTokens(payload.tokens)
+    ? await refreshOpenAISubscriptionProxyTokens(payload.tokens)
+    : payload.tokens
+
+  const headers = new Headers(payload.request.headers)
+  headers.delete('authorization')
+  headers.delete('Authorization')
+  headers.set('authorization', `Bearer ${nextTokens.accessToken}`)
+  if (nextTokens.accountId) {
+    headers.set('ChatGPT-Account-Id', nextTokens.accountId)
+  }
+
+  const targetUrl = rewriteOpenAISubscriptionTargetUrl(payload.request.url)
+  const requestBody = targetUrl.toString() === OPENAI_SUBSCRIPTION_CODEX_ENDPOINT
+    ? normalizeOpenAISubscriptionCodexBody(payload.request.body)
+    : payload.request.body
+
+  const response = await fetch(targetUrl, {
+    method: payload.request.method,
+    headers,
+    body: requestBody,
+  })
+
+  const responseBody = await response.text()
+  if (!response.ok) {
+    return {
+      response: {
+        status: response.status,
+        statusText: response.statusText,
+        headers: [['content-type', response.headers.get('content-type') || 'application/json']],
+        body: responseBody,
+      },
+      tokens: nextTokens,
+    }
+  }
+
+  const normalizedJson = targetUrl.toString() === OPENAI_SUBSCRIPTION_CODEX_ENDPOINT
+    ? transformCodexResponseToChatCompletionsJson(responseBody, payload.model)
+    : JSON.parse(responseBody)
+
+  return {
+    response: {
+      status: response.status,
+      statusText: response.statusText,
+      headers: [['content-type', 'application/json; charset=utf-8']],
+      body: JSON.stringify(normalizedJson),
     },
     tokens: nextTokens,
   }

@@ -105,5 +105,5 @@ export async function setupBaseWindowElectronInvokes(params: {
   await createI18nService({ context: params.context, window: params.window, i18n: params.i18n })
 
   createServerChannelService({ serverChannel: params.serverChannel })
-  createMemoryValidationService({ context: params.context })
+  createMemoryValidationService({ context: params.context, window: params.window })
 }
