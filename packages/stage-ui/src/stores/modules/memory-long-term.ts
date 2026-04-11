@@ -42,6 +42,9 @@ interface LlmWikiQueryResultItem {
   excerpt: string
 }
 
+const NON_ALPHANUMERIC_DASHES_PATTERN = /[^a-z0-9-]+/giu
+const EDGE_DASHES_PATTERN = /^-+|-+$/gu
+
 function isLegacyBrokenDebugEntry(value: unknown): value is '[object Object]' {
   return value === '[object Object]'
 }
@@ -57,6 +60,91 @@ function buildLlmWikiRecallPrompt(items: LlmWikiQueryResultItem[]) {
     'When you rely on them, prefer concise answers and mention the page title naturally when it helps.',
     ...items.map((item, index) => `${index + 1}. [${item.title}] (${item.path}) ${item.excerpt}`),
   ].join('\n')
+}
+
+interface LlmWikiPromotionSourceItem {
+  category?: string
+  confidence?: number
+  createdAt?: string
+  id: string
+  memory: string
+  provenance?: string
+  userId?: string
+}
+
+interface BuildLlmWikiPromotionCandidatesOptions {
+  allowPromotion: boolean
+  items: LlmWikiPromotionSourceItem[]
+  manualReviewRequired: boolean
+  personaReviewRequired: boolean
+}
+
+type LlmWikiPromotionCandidateStatus = 'blocked' | 'pending-review' | 'ready'
+
+interface LlmWikiPromotionCandidate {
+  blockedReason?: string
+  id: string
+  memory: string
+  reviewRequired: boolean
+  status: LlmWikiPromotionCandidateStatus
+  suggestedPath?: string
+}
+
+function isShortTermPersonalCategory(category: string | undefined) {
+  return category?.startsWith('identity.')
+    || category?.startsWith('preference.')
+    || category?.startsWith('profile.')
+}
+
+function slugifyPromotionCategory(category: string | undefined) {
+  return category?.split('.').slice(1).join('-').replace(NON_ALPHANUMERIC_DASHES_PATTERN, '-').replace(EDGE_DASHES_PATTERN, '') || 'general'
+}
+
+export function buildLlmWikiPromotionCandidates(options: BuildLlmWikiPromotionCandidatesOptions): LlmWikiPromotionCandidate[] {
+  return options.items.map((item) => {
+    if (!options.allowPromotion) {
+      return {
+        blockedReason: 'llm-wiki promotion is disabled.',
+        id: item.id,
+        memory: item.memory,
+        reviewRequired: options.manualReviewRequired || options.personaReviewRequired,
+        status: 'blocked',
+      }
+    }
+
+    if (isShortTermPersonalCategory(item.category)) {
+      return {
+        blockedReason: 'This looks like short-term memory for a specific user and should not be promoted into shared llm-wiki.',
+        id: item.id,
+        memory: item.memory,
+        reviewRequired: options.manualReviewRequired || options.personaReviewRequired,
+        status: 'blocked',
+      }
+    }
+
+    if ((item.provenance === 'llm-assisted') && typeof item.confidence === 'number' && item.confidence < 0.6) {
+      return {
+        blockedReason: 'Candidate confidence is too low for llm-wiki promotion.',
+        id: item.id,
+        memory: item.memory,
+        reviewRequired: options.manualReviewRequired || options.personaReviewRequired,
+        status: 'blocked',
+      }
+    }
+
+    const suggestedPath = item.category?.startsWith('topic.')
+      ? `wiki/topics/${slugifyPromotionCategory(item.category)}.md`
+      : `wiki/memory/${slugifyPromotionCategory(item.category)}.md`
+    const reviewRequired = options.manualReviewRequired || options.personaReviewRequired
+
+    return {
+      id: item.id,
+      memory: item.memory,
+      reviewRequired,
+      status: reviewRequired ? 'pending-review' : 'ready',
+      suggestedPath,
+    }
+  })
 }
 
 export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
