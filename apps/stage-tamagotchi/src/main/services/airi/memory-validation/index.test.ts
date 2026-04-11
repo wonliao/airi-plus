@@ -73,6 +73,34 @@ beforeEach(() => {
       })
     }
 
+    if (url.pathname.startsWith('/memories/') && init?.method === 'PUT') {
+      const memoryId = url.pathname.split('/').at(-1) ?? ''
+      const body = JSON.parse(String(init.body ?? '{}')) as {
+        metadata?: Record<string, unknown>
+        text?: string
+      }
+      const existing = mockRemoteMem0Store.find(item => item.id === memoryId)
+      if (!existing) {
+        return jsonResponse({ detail: 'Not found' }, 404)
+      }
+
+      existing.memory = body.text ?? existing.memory
+      existing.createdAt = existing.createdAt
+
+      return jsonResponse({
+        id: existing.id,
+        memory: existing.memory,
+        metadata: body.metadata ?? null,
+      })
+    }
+
+    if (url.pathname.startsWith('/memories/') && init?.method === 'DELETE') {
+      const memoryId = url.pathname.split('/').at(-1) ?? ''
+      const kept = mockRemoteMem0Store.filter(item => item.id !== memoryId)
+      mockRemoteMem0Store.splice(0, mockRemoteMem0Store.length, ...kept)
+      return jsonResponse({ message: 'ok' })
+    }
+
     if (url.pathname === '/memories' && init?.method === 'DELETE') {
       const kept = mockRemoteMem0Store.filter(item => !matchesMemoryScope(item, url.searchParams))
       mockRemoteMem0Store.splice(0, mockRemoteMem0Store.length, ...kept)
@@ -348,6 +376,34 @@ describe('short-term memory desktop runtime', () => {
     })
 
     expect(afterClear.items).toHaveLength(0)
+  })
+
+  it('canonicalizes exact duplicate remote memories into a single item', async () => {
+    mockRemoteMem0Store.push(
+      {
+        createdAt: '2026-04-11T10:00:00.000Z',
+        id: 'memory-old-1',
+        memory: '名字是 Ben',
+        userId: 'local',
+      },
+      {
+        createdAt: '2026-04-11T10:00:01.000Z',
+        id: 'memory-old-2',
+        memory: '名字是 Ben',
+        userId: 'local',
+      },
+    )
+
+    const listed = await __memoryValidationTestUtils.listShortTermMemory({
+      ...createRemoteMem0ScopePayload({
+        userId: 'local',
+      }),
+      limit: 10,
+    })
+
+    expect(listed.ok).toBe(true)
+    expect(listed.items).toHaveLength(1)
+    expect(mockRemoteMem0Store).toHaveLength(1)
   })
 })
 

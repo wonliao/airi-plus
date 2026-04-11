@@ -15,6 +15,8 @@ import { computed, ref } from 'vue'
 
 const shortTermMemoryClearTimeoutMsec = 5_000
 const mem0DefaultBaseUrl = 'http://127.0.0.1:8000'
+const legacySearchThresholdDefault = 0.6
+const remoteSearchThresholdDefault = 0.45
 const cjkQueryPattern = /[\u3400-\u9FFF\uF900-\uFAFF]/u
 const memoryOperationLinePattern = /^(?:ADD|NONE|UPDATE|DELETE|CLEAR):/u
 
@@ -418,7 +420,7 @@ const defaultShortTermMemorySettings = {
   baseUrl: mem0DefaultBaseUrl,
   enabled: true,
   runId: '',
-  searchThreshold: 0.6,
+  searchThreshold: remoteSearchThresholdDefault,
   topK: 5,
   userId: 'local',
 } as const
@@ -460,6 +462,13 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
 
   if (!baseUrl.value.trim()) {
     baseUrl.value = defaultShortTermMemorySettings.baseUrl
+  }
+
+  // NOTICE: Short-term recall against remote Mem0 can land just below 0.5 for
+  // natural Chinese paraphrases like "我的名字?" -> "名字是 Nora". If a user is
+  // still on the old default threshold, migrate it to the safer remote default.
+  if (searchThreshold.value === legacySearchThresholdDefault || searchThreshold.value === 0.5) {
+    searchThreshold.value = defaultShortTermMemorySettings.searchThreshold
   }
 
   const backendId = computed(() => 'remote-mem0')

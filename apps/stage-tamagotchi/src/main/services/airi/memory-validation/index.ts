@@ -309,6 +309,40 @@ function toShortTermCaptureResultItem(item: RemoteMem0CaptureItem): ShortTermMem
   }
 }
 
+function buildShortTermMemoryDedupKey(item: ShortTermMemoryResultItem) {
+  return JSON.stringify({
+    category: item.category?.trim() ?? '',
+    conflictKey: item.conflictKey?.trim() ?? '',
+    memory: item.memory.trim(),
+    userId: item.userId.trim(),
+  })
+}
+
+function getShortTermMemoryTimestamp(item: ShortTermMemoryResultItem) {
+  return item.updatedAt ?? item.createdAt
+}
+
+function dedupeShortTermMemoryItems(items: ShortTermMemoryResultItem[]) {
+  const deduped = new Map<string, ShortTermMemoryResultItem>()
+
+  for (const item of items) {
+    const key = buildShortTermMemoryDedupKey(item)
+    const existing = deduped.get(key)
+    if (!existing) {
+      deduped.set(key, item)
+      continue
+    }
+
+    const existingTime = Date.parse(getShortTermMemoryTimestamp(existing))
+    const nextTime = Date.parse(getShortTermMemoryTimestamp(item))
+    if (Number.isNaN(existingTime) || (!Number.isNaN(nextTime) && nextTime >= existingTime)) {
+      deduped.set(key, item)
+    }
+  }
+
+  return [...deduped.values()]
+}
+
 function readRemoteMem0Message(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== 'object') {
     return fallback
@@ -350,6 +384,44 @@ async function listRemoteMem0Memories(payload: ShortTermMemoryListPayload) {
   return readRemoteMem0Items(responsePayload)
     .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim()))
     .filter(item => !!item.id && !!item.memory)
+}
+
+async function deleteRemoteMem0MemoryById(params: {
+  apiKey: string
+  baseUrl: string
+  memoryId: string
+}) {
+  const response = await fetch(new URL(`/memories/${params.memoryId}`, `${normalizeRemoteMem0BaseUrl(params.baseUrl)}/`), {
+    headers: createRemoteMem0Headers(params.apiKey),
+    method: 'DELETE',
+  })
+  const responsePayload = await parseRemoteMem0Json(response)
+
+  assertRemoteMem0ResponseOk(response, responsePayload, `Remote Mem0 delete failed for memory ${params.memoryId}.`)
+}
+
+async function canonicalizeRemoteMem0Memories(payload: ShortTermMemoryListPayload) {
+  const rawItems = await listRemoteMem0Memories(payload)
+  const dedupedItems = dedupeShortTermMemoryItems(rawItems)
+
+  if (dedupedItems.length === rawItems.length) {
+    return dedupedItems
+  }
+
+  const dedupedIds = new Set(dedupedItems.map(item => item.id))
+  const duplicateIds = rawItems
+    .filter(item => !dedupedIds.has(item.id))
+    .map(item => item.id)
+
+  await Promise.all(duplicateIds.map(memoryId =>
+    deleteRemoteMem0MemoryById({
+      apiKey: payload.apiKey,
+      baseUrl: payload.baseUrl,
+      memoryId,
+    }),
+  ))
+
+  return dedupedItems
 }
 
 async function assertReadableDirectory(path: string, label: string) {
@@ -907,7 +979,7 @@ async function validateShortTermMemory(
 
 async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise<ShortTermMemoryListResult> {
   try {
-    const items = await listRemoteMem0Memories(payload)
+    const items = await canonicalizeRemoteMem0Memories(payload)
 
     return {
       ok: true,
@@ -928,7 +1000,7 @@ async function listShortTermMemory(payload: ShortTermMemoryListPayload): Promise
 
 async function clearShortTermMemory(payload: ShortTermMemoryClearPayload): Promise<ShortTermMemoryClearResult> {
   try {
-    const latestMemoryItems = await listRemoteMem0Memories({
+    const latestMemoryItems = await canonicalizeRemoteMem0Memories({
       ...payload,
       appId: undefined,
       limit: 100,
@@ -991,7 +1063,7 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
   }
 
   try {
-    const latestMemoryItems = await listRemoteMem0Memories({
+    const latestMemoryItems = await canonicalizeRemoteMem0Memories({
       apiKey: payload.apiKey,
       appId: payload.appId,
       baseUrl: payload.baseUrl,
@@ -1019,9 +1091,11 @@ async function searchShortTermMemory(payload: ShortTermMemorySearchPayload): Pro
 
     assertRemoteMem0ResponseOk(response, responsePayload, 'Remote Mem0 search failed.')
 
-    const items = readRemoteMem0Items(responsePayload)
-      .filter(item => typeof item.score !== 'number' || item.score >= payload.searchThreshold)
-      .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim()))
+    const items = dedupeShortTermMemoryItems(
+      readRemoteMem0Items(responsePayload)
+        .filter(item => typeof item.score !== 'number' || item.score >= payload.searchThreshold)
+        .map(item => toShortTermResultItem(item as RemoteMem0ResultItem, payload.userId.trim())),
+    )
 
     return {
       ok: true,
@@ -1079,7 +1153,7 @@ async function captureShortTermMemory(payload: ShortTermMemoryCapturePayload): P
     const captureItems = readRemoteMem0Items(responsePayload)
       .map(item => toShortTermCaptureResultItem(item as RemoteMem0CaptureItem))
       .filter(item => !!item.id || !!item.memory)
-    const latestMemoryItems = await listRemoteMem0Memories({
+    const latestMemoryItems = await canonicalizeRemoteMem0Memories({
       apiKey: payload.apiKey,
       appId: payload.appId,
       baseUrl: payload.baseUrl,
