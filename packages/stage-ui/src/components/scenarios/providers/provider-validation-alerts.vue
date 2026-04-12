@@ -14,6 +14,7 @@ const props = defineProps<{
   onRunTest: () => void
   onForceValid: () => void
   onGoToModelSelection: () => void
+  showGoToModelSelection?: boolean
 }>()
 
 const { t } = useI18n()
@@ -61,6 +62,7 @@ const { t } = useI18n()
             {{ isManualTesting ? t('settings.dialogs.onboarding.testGenerationRunning') : t('settings.dialogs.onboarding.testGeneration') }}
           </button>
           <button
+            v-if="props.showGoToModelSelection !== false"
             type="button"
             :class="['rounded px-2 py-0.5 text-xs font-medium transition-colors', 'bg-blue-100 text-blue-600 hover:bg-blue-200', 'dark:bg-blue-800/30 dark:text-blue-300 dark:hover:bg-blue-700/40']"
             @click="props.onGoToModelSelection"
@@ -77,6 +79,7 @@ const { t } = useI18n()
       <div :class="['w-full flex items-center justify-between']">
         <span>{{ t('settings.dialogs.onboarding.validationSuccess') }}</span>
         <button
+          v-if="props.showGoToModelSelection !== false"
           type="button"
           :class="['ml-2 rounded px-2 py-0.5 text-xs font-medium transition-colors', 'bg-green-100 text-green-600 hover:bg-green-200', 'dark:bg-green-800/30 dark:text-green-300 dark:hover:bg-green-700/40']"
           @click="props.onGoToModelSelection"

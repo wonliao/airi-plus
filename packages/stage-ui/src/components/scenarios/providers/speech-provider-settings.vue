@@ -24,6 +24,10 @@ const props = defineProps<{
   // Additional provider-specific settings
   additionalSettings?: Record<string, any>
   placeholder?: string
+  showApiKeyInput?: boolean
+  showBaseUrlInput?: boolean
+  showAdvancedSettings?: boolean
+  onReset?: () => void
 }>()
 
 // Expose slots and emit events to allow customization
@@ -133,9 +137,14 @@ function handleResetVoiceSettings() {
         <ProviderBasicSettings
           :title="t('settings.pages.providers.common.section.basic.title')"
           :description="t('settings.pages.providers.common.section.basic.description')"
-          :on-reset="handleResetVoiceSettings"
+          :on-reset="props.onReset || handleResetVoiceSettings"
         >
-          <ProviderApiKeyInput v-model="apiKey" :provider-name="providerMetadata?.localizedName" :placeholder="props.placeholder || 'API Key'" />
+          <ProviderApiKeyInput
+            v-if="props.showApiKeyInput !== false"
+            v-model="apiKey"
+            :provider-name="providerMetadata?.localizedName"
+            :placeholder="props.placeholder || 'API Key'"
+          />
           <!-- Slot for provider-specific basic settings -->
           <slot name="basic-settings" />
         </ProviderBasicSettings>
@@ -152,8 +161,12 @@ function handleResetVoiceSettings() {
         </div>
 
         <!-- Advanced settings section -->
-        <ProviderAdvancedSettings :title="t('settings.pages.providers.common.section.advanced.title')">
+        <ProviderAdvancedSettings
+          v-if="props.showAdvancedSettings !== false"
+          :title="t('settings.pages.providers.common.section.advanced.title')"
+        >
           <ProviderBaseUrlInput
+            v-if="props.showBaseUrlInput !== false"
             v-model="baseUrl"
             :placeholder="providerMetadata?.defaultOptions?.().baseUrl as string || ''" required
           />

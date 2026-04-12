@@ -2,6 +2,7 @@ import type { SpeechProviderWithExtraOptions } from '@xsai-ext/providers/utils'
 
 import type { VoiceInfo } from '../providers'
 
+import { isStageTamagotchi } from '@proj-airi/stage-shared'
 import { useLocalStorageManualReset } from '@proj-airi/stage-shared/composables'
 import { refManualReset } from '@vueuse/core'
 import { generateSpeech } from '@xsai/generate-speech'
@@ -20,7 +21,24 @@ export function toSignedPercent(value: number): string {
   return '0%'
 }
 
+export function shouldUseFrierenSpeechByDefault(params: {
+  isDesktop: boolean
+  activeProvider: string
+  configuredProviderIds: string[]
+}) {
+  if (!params.isDesktop) {
+    return false
+  }
+
+  const hasNoSpeechSelection = !params.activeProvider || params.activeProvider === 'speech-noop'
+  return hasNoSpeechSelection && params.configuredProviderIds.includes('frieren-rvc-sidecar')
+}
+
 export const useSpeechStore = defineStore('speech', () => {
+  const frierenSpeechProviderId = 'frieren-rvc-sidecar'
+  const frierenSpeechDefaultModelId = 'frieren-rvc'
+  const frierenSpeechDefaultVoiceId = 'frieren'
+
   const providersStore = useProvidersStore()
   const { allAudioSpeechProvidersMetadata } = storeToRefs(providersStore)
 
@@ -127,6 +145,24 @@ export const useSpeechStore = defineStore('speech', () => {
   if (!activeSpeechProvider.value) {
     activeSpeechProvider.value = 'speech-noop'
   }
+
+  watch(
+    () => providersStore.configuredSpeechProvidersMetadata.map(provider => provider.id),
+    (configuredProviderIds) => {
+      if (!shouldUseFrierenSpeechByDefault({
+        isDesktop: isStageTamagotchi(),
+        activeProvider: activeSpeechProvider.value,
+        configuredProviderIds,
+      })) {
+        return
+      }
+
+      activeSpeechProvider.value = frierenSpeechProviderId
+      activeSpeechModel.value = frierenSpeechDefaultModelId
+      activeSpeechVoiceId.value = frierenSpeechDefaultVoiceId
+    },
+    { immediate: true },
+  )
 
   watch(
     () => providersStore.configuredSpeechProvidersMetadata.map(provider => provider.id),
