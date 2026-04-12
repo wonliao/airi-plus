@@ -60,6 +60,12 @@ export interface AiriCard extends Card {
   } & Card['extensions']
 }
 
+function fallbackIfBlank(value: string | undefined, fallback: string) {
+  return typeof value === 'string' && value.trim()
+    ? value
+    : fallback
+}
+
 function buildBuiltinCards(t: (key: string) => string): Record<string, Card> {
   return {
     default: {
@@ -165,6 +171,10 @@ function dedupeBuiltinFrierenCard(cards: Map<string, AiriCard>, activeCardId: { 
   }
 }
 
+function cardsEqual(left: AiriCard, right: AiriCard) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 export const useAiriCardStore = defineStore('airi-card', () => {
   const { t } = useI18n()
 
@@ -248,13 +258,13 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     return {
       modules: {
         consciousness: {
-          provider: existingExtension.modules?.consciousness?.provider ?? defaultModules.consciousness.provider,
-          model: existingExtension.modules?.consciousness?.model ?? defaultModules.consciousness.model,
+          provider: fallbackIfBlank(existingExtension.modules?.consciousness?.provider, defaultModules.consciousness.provider),
+          model: fallbackIfBlank(existingExtension.modules?.consciousness?.model, defaultModules.consciousness.model),
         },
         speech: {
-          provider: existingExtension.modules?.speech?.provider ?? defaultModules.speech.provider,
-          model: existingExtension.modules?.speech?.model ?? defaultModules.speech.model,
-          voice_id: existingExtension.modules?.speech?.voice_id ?? defaultModules.speech.voice_id,
+          provider: fallbackIfBlank(existingExtension.modules?.speech?.provider, defaultModules.speech.provider),
+          model: fallbackIfBlank(existingExtension.modules?.speech?.model, defaultModules.speech.model),
+          voice_id: fallbackIfBlank(existingExtension.modules?.speech?.voice_id, defaultModules.speech.voice_id),
           pitch: existingExtension.modules?.speech?.pitch,
           rate: existingExtension.modules?.speech?.rate,
           ssml: existingExtension.modules?.speech?.ssml,
@@ -262,7 +272,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
         },
         vrm: existingExtension.modules?.vrm,
         live2d: existingExtension.modules?.live2d,
-        displayModelId: existingExtension.modules?.displayModelId ?? defaultModules.displayModelId,
+        displayModelId: fallbackIfBlank(existingExtension.modules?.displayModelId, defaultModules.displayModelId),
       },
       agents: existingExtension.agents ?? {},
     }
@@ -301,8 +311,8 @@ export const useAiriCardStore = defineStore('airi-card', () => {
           : [],
         tags: ccv3Card.data.tags ?? [],
         extensions: {
-          airi: resolveAiriExtension(ccv3Card),
           ...ccv3Card.data.extensions,
+          airi: resolveAiriExtension(ccv3Card),
         },
       }
     }
@@ -310,8 +320,8 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     return {
       ...card,
       extensions: {
-        airi: resolveAiriExtension(card),
         ...card.extensions,
+        airi: resolveAiriExtension(card),
       },
     }
   }
@@ -336,6 +346,15 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     }
   }
 
+  function normalizeStoredCards() {
+    for (const [id, card] of cards.value.entries()) {
+      const normalizedCard = newAiriCard(card)
+      if (!cardsEqual(card, normalizedCard)) {
+        cards.value.set(id, normalizedCard)
+      }
+    }
+  }
+
   function initialize() {
     const builtins = buildBuiltinCards(t)
     for (const [id, card] of Object.entries(builtins)) {
@@ -345,6 +364,7 @@ export const useAiriCardStore = defineStore('airi-card', () => {
     // NOTICE: `Frieren` existed as a locally created user card before it was promoted
     // into a built-in preset. Deduplicate the old local copy so profile lists stay stable.
     dedupeBuiltinFrierenCard(cards.value, activeCardId)
+    normalizeStoredCards()
 
     if (!activeCardId.value)
       activeCardId.value = 'default'

@@ -1,14 +1,9 @@
 import localforage from 'localforage'
 
-import { loadLive2DModelPreview as generateLive2DPreview } from '@proj-airi/stage-ui-live2d/utils/live2d-preview'
-import { loadVrmModelPreview as generateVrmPreview } from '@proj-airi/stage-ui-three/utils/vrm-preview'
 import { until } from '@vueuse/core'
 import { nanoid } from 'nanoid'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-
-import '@proj-airi/stage-ui-live2d/utils/live2d-zip-loader'
-import '@proj-airi/stage-ui-live2d/utils/live2d-opfs-registration'
 
 export enum DisplayModelFormat {
   Live2dZip = 'live2d-zip',
@@ -58,6 +53,24 @@ const displayModelsPresets: DisplayModel[] = [
   { id: 'preset-vrm-2', format: DisplayModelFormat.VRM, type: 'url', url: presetVrmAvatarBUrl, name: 'AvatarSample_B', previewImage: presetVrmAvatarBPreview, importedAt: 1733113886840 },
 ]
 
+async function ensureLive2DModelRuntime() {
+  await Promise.all([
+    import('@proj-airi/stage-ui-live2d/utils/live2d-zip-loader'),
+    import('@proj-airi/stage-ui-live2d/utils/live2d-opfs-registration'),
+  ])
+}
+
+async function loadLive2DModelPreview(file: File) {
+  await ensureLive2DModelRuntime()
+  const { loadLive2DModelPreview: generateLive2DPreview } = await import('@proj-airi/stage-ui-live2d/utils/live2d-preview')
+  return generateLive2DPreview(file)
+}
+
+async function loadVrmModelPreview(file: File) {
+  const { loadVrmModelPreview: generateVrmPreview } = await import('@proj-airi/stage-ui-three/utils/vrm-preview')
+  return generateVrmPreview(file)
+}
+
 export const useDisplayModelsStore = defineStore('display-models', () => {
   const displayModels = ref<DisplayModel[]>([])
 
@@ -93,12 +106,6 @@ export const useDisplayModelsStore = defineStore('display-models', () => {
 
     // Fallback to in-memory presets if not found in localforage
     return displayModelsPresets.find(model => model.id === id)
-  }
-
-  const loadLive2DModelPreview = (file: File) => generateLive2DPreview(file)
-
-  async function loadVrmModelPreview(file: File) {
-    return generateVrmPreview(file)
   }
 
   async function addDisplayModel(format: DisplayModelFormat, file: File) {
