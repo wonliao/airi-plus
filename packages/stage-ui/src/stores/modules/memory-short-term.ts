@@ -19,6 +19,7 @@ const legacySearchThresholdDefault = 0.6
 const remoteSearchThresholdDefault = 0.45
 const cjkQueryPattern = /[\u3400-\u9FFF\uF900-\uFAFF]/u
 const memoryOperationLinePattern = /^(?:ADD|NONE|UPDATE|DELETE|CLEAR):/u
+const trailingSlashPattern = /\/+$/u
 
 interface Mem0MessageInput {
   role: 'assistant' | 'user'
@@ -120,7 +121,7 @@ function buildMem0RecallPrompt(query: string, results: Mem0SearchResult[]) {
 }
 
 export function normalizeMem0BaseUrl(value: string) {
-  const trimmed = value.trim().replace(/\/+$/u, '')
+  const trimmed = value.trim().replace(trailingSlashPattern, '')
   return trimmed || managedLocalMem0BaseUrl
 }
 
@@ -632,7 +633,6 @@ export const useShortTermMemoryStore = defineStore('memory-short-term', () => {
         agentId: agentId.value.trim(),
         runId: runId.value.trim(),
       }
-      const latestMemoryItems = await fetchLatestMemoryItems()
       const response = await Promise.race([
         clearShortTermMemoryOnDesktop(payload),
         new Promise<undefined>((resolve) => {

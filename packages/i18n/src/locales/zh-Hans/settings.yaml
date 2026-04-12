@@ -442,7 +442,7 @@ pages:
       sections:
         configuration:
           title: llm-wiki 配置
-          description: 配置 AIRI 用于整理与可提升记忆的长期知识工作区。
+          description: AIRI 会自动管理默认的 llm-wiki 长期知识工作区，无需手动配置路径。
       fields:
         enabled:
           label: 启用长期记忆
@@ -478,7 +478,7 @@ pages:
           placeholder: 在此描述工作区约定、digest 指令或审核规则。
       notes:
         title: 首版范围
-        content: 此页面现在已支持桌面版 llm-wiki 查询 recall，以及配置与验证；在 AIRI Electron 上，如果尚未设置工作区路径，系统会先在 app data 目录初始化一份默认 llm-wiki 工作区。完整的 ingest 与 promotion 自动化可以在后续再接入。
+        content: 此页面现在已支持桌面版 llm-wiki 查询 recall 与基础验证；在 AIRI Electron 上，系统会自动在 app data 目录初始化并管理默认的 llm-wiki 工作区，因此无需手动配置路径。完整的 ingest 与 promotion 自动化可以在后续再接入。
       debug:
         lastRecall: 最近一次 llm-wiki recall
         latestSources: 最新来源

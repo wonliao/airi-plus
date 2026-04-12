@@ -228,10 +228,6 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
       return
     }
 
-    if (workspacePath.value.trim() && !isElectronManagedMemoryAlias(workspacePath.value.trim(), 'llm-wiki')) {
-      return
-    }
-
     if (!defaultWorkspacePromise) {
       defaultWorkspacePromise = (async () => {
         try {
@@ -240,6 +236,9 @@ export const useLongTermMemoryStore = defineStore('memory-long-term', () => {
             return
           }
 
+          // NOTICE: Desktop long-term memory now always uses the AIRI-managed llm-wiki
+          // workspace, so we normalize any previously persisted custom paths back to the
+          // managed defaults before validation and runtime recall.
           workspacePath.value = result.workspacePath
           indexPath.value = result.indexPath
           overviewPath.value = result.overviewPath

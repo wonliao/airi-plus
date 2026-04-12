@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { FieldCheckbox, FieldInput, FieldTextArea, Select } from '@proj-airi/ui'
+import { FieldCheckbox, FieldTextArea, Select } from '@proj-airi/ui'
 import { storeToRefs } from 'pinia'
 import { onMounted } from 'vue'
 
@@ -14,9 +14,6 @@ const {
   configured,
   validationStatus,
   lastValidation,
-  workspacePath,
-  indexPath,
-  overviewPath,
   queryMode,
   allowPromotion,
   manualReviewRequired,
@@ -64,40 +61,17 @@ onMounted(() => {
         </div>
 
         <div :class="['rounded-2xl border p-5', 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50']">
-          <div :class="['grid grid-cols-1 gap-5 md:grid-cols-2']">
-            <FieldInput
-              v-model="workspacePath"
-              :label="$t('settings.pages.modules.memory-long-term.fields.workspacePath.label')"
-              :description="$t('settings.pages.modules.memory-long-term.fields.workspacePath.description')"
-              :placeholder="$t('settings.pages.modules.memory-long-term.fields.workspacePath.placeholder')"
+          <div :class="['flex flex-col gap-4']">
+            <div :class="['text-sm font-medium']">
+              {{ $t('settings.pages.modules.memory-long-term.fields.queryMode.label') }}
+            </div>
+            <Select
+              v-model="queryMode"
+              :options="queryModeOptions"
+              :placeholder="$t('settings.pages.modules.memory-long-term.fields.queryMode.placeholder')"
             />
-
-            <FieldInput
-              v-model="indexPath"
-              :label="$t('settings.pages.modules.memory-long-term.fields.indexPath.label')"
-              :description="$t('settings.pages.modules.memory-long-term.fields.indexPath.description')"
-              :placeholder="$t('settings.pages.modules.memory-long-term.fields.indexPath.placeholder')"
-            />
-
-            <FieldInput
-              v-model="overviewPath"
-              :label="$t('settings.pages.modules.memory-long-term.fields.overviewPath.label')"
-              :description="$t('settings.pages.modules.memory-long-term.fields.overviewPath.description')"
-              :placeholder="$t('settings.pages.modules.memory-long-term.fields.overviewPath.placeholder')"
-            />
-
-            <div :class="['flex flex-col gap-4']">
-              <div :class="['text-sm font-medium']">
-                {{ $t('settings.pages.modules.memory-long-term.fields.queryMode.label') }}
-              </div>
-              <Select
-                v-model="queryMode"
-                :options="queryModeOptions"
-                :placeholder="$t('settings.pages.modules.memory-long-term.fields.queryMode.placeholder')"
-              />
-              <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
-                {{ $t('settings.pages.modules.memory-long-term.fields.queryMode.description') }}
-              </div>
+            <div :class="['text-xs text-neutral-500 dark:text-neutral-400']">
+              {{ $t('settings.pages.modules.memory-long-term.fields.queryMode.description') }}
             </div>
           </div>
         </div>

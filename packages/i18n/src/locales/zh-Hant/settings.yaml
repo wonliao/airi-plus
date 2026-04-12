@@ -433,7 +433,7 @@ pages:
       sections:
         configuration:
           title: llm-wiki 設定
-          description: 設定 AIRI 用於整理與可升級記憶的長期知識工作區。
+          description: AIRI 會自動管理預設的 llm-wiki 長期知識工作區，無需手動設定路徑。
       fields:
         enabled:
           label: 啟用長期記憶
@@ -469,7 +469,7 @@ pages:
           placeholder: 在此描述工作區慣例、digest 指令或審核規則。
       notes:
         title: 首版範圍
-        content: 此頁面現在已支援桌面版 llm-wiki 查詢 recall，以及設定與驗證；在 AIRI Electron 上，如果尚未設定工作區路徑，系統會先在 app data 目錄初始化一份預設 llm-wiki 工作區。完整的 ingest 與 promotion 自動化可於後續再接入。
+        content: 此頁面現在已支援桌面版 llm-wiki 查詢 recall 與基礎驗證；在 AIRI Electron 上，系統會自動在 app data 目錄初始化並管理預設的 llm-wiki 工作區，因此無需手動設定路徑。完整的 ingest 與 promotion 自動化可於後續再接入。
       debug:
         lastRecall: 最近一次 llm-wiki recall
         latestSources: 最新來源

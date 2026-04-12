@@ -472,7 +472,7 @@ pages:
       sections:
         configuration:
           title: llm-wiki configuration
-          description: Configure the long-term knowledge workspace AIRI should use for curated and promotable memory.
+          description: AIRI automatically manages the default llm-wiki long-term knowledge workspace, so no path setup is needed.
       fields:
         enabled:
           label: Enable long-term memory
@@ -508,7 +508,7 @@ pages:
           placeholder: Describe any workspace conventions, digest commands, or review rules here.
       notes:
         title: First-release scope
-        content: This page now supports desktop llm-wiki query recall alongside configuration and validation. On AIRI Electron, a default llm-wiki workspace is initialized under the app data directory when no workspace path is configured yet. Full ingest and promotion automation can be wired later.
+        content: This page now supports desktop llm-wiki query recall and basic validation. On AIRI Electron, the app automatically initializes and manages the default llm-wiki workspace under the app data directory, so no path setup is needed. Full ingest and promotion automation can be wired later.
       debug:
         lastRecall: Last llm-wiki recall
         latestSources: Latest sources
