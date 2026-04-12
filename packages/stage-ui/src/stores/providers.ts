@@ -20,7 +20,7 @@ import type {
 
 import type { AliyunRealtimeSpeechExtraOptions } from './providers/aliyun/stream-transcription'
 
-import { isStageTamagotchi, isUrl } from '@proj-airi/stage-shared'
+import { isStageTamagotchi, isUrl, validateFrierenSpeechSidecarOnDesktop } from '@proj-airi/stage-shared'
 import { computedAsync, useIntervalFn, useLocalStorage } from '@vueuse/core'
 import {
   createOpenAI,
@@ -255,6 +255,101 @@ export const useProvidersStore = defineStore('providers', () => {
     }
 
     return false
+  }
+
+  const defaultFrierenSpeechBaseUrl = 'http://127.0.0.1:8010/v1/'
+  const defaultFrierenSpeechDualLlmBaseUrl = 'https://api.openai.com/v1/'
+  const defaultFrierenSpeechDualLlmModel = 'gpt-4.1-mini'
+  const frierenSpeechDefaultModelId = 'frieren-rvc'
+  const frierenSpeechDefaultVoiceId = 'frieren'
+
+  function normalizeFrierenSpeechBaseUrl(value: unknown) {
+    const trimmed = typeof value === 'string' ? value.trim() : ''
+    if (!trimmed) {
+      return defaultFrierenSpeechBaseUrl
+    }
+
+    const normalized = new URL(trimmed)
+    if (normalized.pathname === '/' || normalized.pathname === '') {
+      normalized.pathname = '/v1/'
+    }
+    else if (normalized.pathname === '/v1') {
+      normalized.pathname = '/v1/'
+    }
+    else if (!normalized.pathname.endsWith('/')) {
+      normalized.pathname = `${normalized.pathname}/`
+    }
+
+    normalized.search = ''
+    normalized.hash = ''
+
+    return normalized.toString()
+  }
+
+  function getFrierenSpeechConfig(config: Record<string, unknown>) {
+    return {
+      baseUrl: normalizeFrierenSpeechBaseUrl(config.baseUrl),
+      bridgeDir: typeof config.bridgeDir === 'string' ? config.bridgeDir.trim() : '',
+      dualLlmApiKey: typeof config.dualLlmApiKey === 'string' ? config.dualLlmApiKey.trim() : '',
+      dualLlmBaseUrl: typeof config.dualLlmBaseUrl === 'string' ? config.dualLlmBaseUrl.trim() : defaultFrierenSpeechDualLlmBaseUrl,
+      dualLlmModel: typeof config.dualLlmModel === 'string' ? config.dualLlmModel.trim() : defaultFrierenSpeechDualLlmModel,
+      envFile: typeof config.envFile === 'string' ? config.envFile.trim() : '',
+      kokoroProjectDir: typeof config.kokoroProjectDir === 'string' ? config.kokoroProjectDir.trim() : '',
+      rvcIndexPath: typeof config.rvcIndexPath === 'string' ? config.rvcIndexPath.trim() : '',
+      rvcModelPath: typeof config.rvcModelPath === 'string' ? config.rvcModelPath.trim() : '',
+    }
+  }
+
+  function formatFrierenVoiceName(voiceId: string) {
+    if (voiceId === frierenSpeechDefaultVoiceId) {
+      return 'Frieren'
+    }
+
+    return voiceId
+      .split(/[-_]+/u)
+      .filter(Boolean)
+      .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ')
+  }
+
+  async function validateFrierenSpeechSidecarConfig(config: Record<string, unknown>) {
+    if (!isStageTamagotchi()) {
+      throw new Error('Frieren RVC sidecar is only available in AIRI Desktop.')
+    }
+
+    const normalized = getFrierenSpeechConfig(config)
+    const validationResult = await validateFrierenSpeechSidecarOnDesktop({
+      baseUrl: normalized.baseUrl,
+      bridgeDir: normalized.bridgeDir,
+      ...(normalized.dualLlmApiKey ? { dualLlmApiKey: normalized.dualLlmApiKey } : {}),
+      ...(normalized.dualLlmBaseUrl ? { dualLlmBaseUrl: normalized.dualLlmBaseUrl } : {}),
+      ...(normalized.dualLlmModel ? { dualLlmModel: normalized.dualLlmModel } : {}),
+      ...(normalized.envFile ? { envFile: normalized.envFile } : {}),
+      ...(normalized.kokoroProjectDir ? { kokoroProjectDir: normalized.kokoroProjectDir } : {}),
+      ...(normalized.rvcModelPath ? { rvcModelPath: normalized.rvcModelPath } : {}),
+      ...(normalized.rvcIndexPath ? { rvcIndexPath: normalized.rvcIndexPath } : {}),
+    })
+
+    if (!validationResult) {
+      throw new Error('Frieren RVC sidecar is only available in AIRI Desktop.')
+    }
+
+    if (!validationResult.valid) {
+      throw new Error(validationResult.message || 'Failed to validate the Frieren RVC sidecar.')
+    }
+
+    return validationResult
+  }
+
+  async function fetchFrierenSpeechJson<T>(config: Record<string, unknown>, pathname: string): Promise<T> {
+    const validationResult = await validateFrierenSpeechSidecarConfig(config)
+    const response = await fetch(new URL(pathname, validationResult.validatedBaseUrl))
+
+    if (!response.ok) {
+      throw new Error(`Frieren RVC sidecar request failed: ${response.status} ${response.statusText}`)
+    }
+
+    return await response.json() as T
   }
 
   // Centralized provider metadata with provider factory functions
@@ -645,6 +740,127 @@ export const useProvidersStore = defineStore('providers', () => {
       },
       creator: createOpenAI,
     }),
+    'frieren-rvc-sidecar': {
+      id: 'frieren-rvc-sidecar',
+      category: 'speech',
+      tasks: ['text-to-speech', 'tts'],
+      nameKey: 'settings.pages.providers.provider.frieren-rvc-sidecar.title',
+      name: 'Frieren RVC Sidecar',
+      descriptionKey: 'settings.pages.providers.provider.frieren-rvc-sidecar.description',
+      description: 'AIRI-managed local sidecar for embedded Kokoro + RVC speech synthesis.',
+      icon: 'i-solar:user-speak-rounded-bold-duotone',
+      isAvailableBy: isStageTamagotchi,
+      requiresCredentials: false,
+      defaultOptions: () => ({
+        baseUrl: defaultFrierenSpeechBaseUrl,
+        bridgeDir: '',
+        dualLlmApiKey: '',
+        dualLlmBaseUrl: defaultFrierenSpeechDualLlmBaseUrl,
+        dualLlmModel: defaultFrierenSpeechDualLlmModel,
+        envFile: '',
+        kokoroProjectDir: '',
+        rvcModelPath: '',
+        rvcIndexPath: '',
+        model: frierenSpeechDefaultModelId,
+        voice: frierenSpeechDefaultVoiceId,
+        voiceSettings: {
+          speed: 1.0,
+        },
+      }),
+      createProvider: async (config) => {
+        const provider: SpeechProvider = {
+          speech: (model?: string) => {
+            const normalized = getFrierenSpeechConfig(config)
+            return {
+              baseURL: normalized.baseUrl,
+              model: typeof model === 'string' && model.trim() ? model.trim() : frierenSpeechDefaultModelId,
+              fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+                await validateFrierenSpeechSidecarConfig(config)
+                return fetch(input, init)
+              },
+            }
+          },
+        }
+
+        return provider
+      },
+      capabilities: {
+        listModels: async (config: Record<string, unknown>) => {
+          try {
+            const json = await fetchFrierenSpeechJson<{ data?: Array<{ id?: string }> }>(config, 'models')
+            const modelIds = (json.data || []).flatMap((model) => {
+              if (!model?.id) {
+                return []
+              }
+
+              return [model.id]
+            })
+
+            const resolvedModelIds = modelIds.length > 0 ? modelIds : [frierenSpeechDefaultModelId]
+            return resolvedModelIds.map(modelId => ({
+              id: modelId,
+              name: modelId === frierenSpeechDefaultModelId ? 'Frieren RVC' : modelId,
+              provider: 'frieren-rvc-sidecar',
+              description: 'Embedded Kokoro + RVC sidecar model.',
+              contextLength: 0,
+              deprecated: false,
+            }) satisfies ModelInfo)
+          }
+          catch (error) {
+            console.error('Failed to fetch Frieren sidecar models:', error)
+            return []
+          }
+        },
+        listVoices: async (config: Record<string, unknown>) => {
+          try {
+            const json = await fetchFrierenSpeechJson<{ voices?: string[] }>(config, 'audio/voices')
+            const voiceIds = Array.isArray(json.voices) && json.voices.length > 0
+              ? json.voices
+              : [frierenSpeechDefaultVoiceId]
+
+            return voiceIds.map(voiceId => ({
+              id: voiceId,
+              name: formatFrierenVoiceName(voiceId),
+              provider: 'frieren-rvc-sidecar',
+              description: voiceId === frierenSpeechDefaultVoiceId
+                ? 'Frieren voice through the local embedded sidecar.'
+                : 'Additional Kokoro voice exposed by the local sidecar.',
+              compatibleModels: [frierenSpeechDefaultModelId],
+              gender: 'female',
+              languages: [{
+                code: 'ja',
+                title: 'Japanese',
+              }],
+            }) satisfies VoiceInfo)
+          }
+          catch (error) {
+            console.error('Failed to fetch Frieren sidecar voices:', error)
+            return []
+          }
+        },
+      },
+      validators: {
+        chatPingCheckAvailable: false,
+        validateProviderConfig: async (config) => {
+          try {
+            await validateFrierenSpeechSidecarConfig(config)
+            return {
+              errors: [],
+              reason: '',
+              valid: true,
+            }
+          }
+          catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to validate the Frieren RVC sidecar.'
+            return {
+              errors: [new Error(message)],
+              reason: message,
+              valid: false,
+            }
+          }
+        },
+      },
+    },
     'openai-audio-transcription': buildOpenAICompatibleProvider({
       id: 'openai-audio-transcription',
       name: 'OpenAI',

@@ -890,6 +890,86 @@ pages:
       deepgram-tts:
         description: deepgram.com
         title: Deepgram
+      frieren-rvc-sidecar:
+        description: AIRI-managed local sidecar for embedded Kokoro + RVC speech synthesis.
+        title: Frieren RVC Sidecar
+        callout:
+          title: Managed local sidecar
+          description: AIRI starts a managed local sidecar in embedded mode, keeps the bridge on localhost, and validates it before voice playback. Set a bridge directory to keep using an external checkout, or leave it blank to use AIRI's bundled source and let AIRI generate the managed env file from your Kokoro and RVC paths.
+        fields:
+          field:
+            bridge-dir:
+              label: Bridge Directory
+              description: Optional. Path to an external `frieren-rvc-bridge` checkout that contains `run-local.sh`. Leave blank to use AIRI's bundled sidecar source.
+              placeholder: Leave blank to use AIRI's bundled sidecar source
+            dual-llm-api-key:
+              label: Dual LLM API Key
+              description: Bundled mode only. API key passed into the managed `sidecar.env` as `DUAL_LLM_API_KEY` for text response generation.
+              placeholder: sk-...
+            dual-llm-base-url:
+              label: Dual LLM Base URL
+              description: Bundled mode only. OpenAI-compatible base URL written into the managed `sidecar.env` as `DUAL_LLM_BASE_URL`.
+              placeholder: https://api.openai.com/v1/
+            dual-llm-model:
+              label: Dual LLM Model
+              description: Bundled mode only. Chat model written into the managed `sidecar.env` as `DUAL_LLM_MODEL`.
+              placeholder: gpt-4.1-mini
+            kokoro-project-dir:
+              label: Kokoro Project Directory
+              description: Bundled mode only. AIRI uses this local `Kokoro-FastAPI` checkout to run embedded synthesis and writes it into the managed `sidecar.env`.
+              placeholder: /path/to/Kokoro-FastAPI
+            rvc-model-path:
+              label: RVC Model Path
+              description: Bundled mode only. Path to the `.pth` voice model file used by the managed Frieren sidecar.
+              placeholder: /path/to/Frieren_e720_s6480.pth
+            rvc-index-path:
+              label: RVC Index Path
+              description: Bundled mode only. Path to the `.index` file paired with the selected RVC model.
+              placeholder: /path/to/added_IVF280_Flat_nprobe_1_Frieren_v2.index
+            env-file:
+              label: Env File
+              description: Optional advanced override. AIRI passes this file through as `ENV_FILE` when starting the sidecar. Bundled mode prefers the structured Kokoro and RVC path fields above, then falls back to `sidecar.env` inside the AIRI runtime directory.
+              placeholder: /path/to/frieren.env or relative to the AIRI runtime
+        runtime:
+          loading: Inspecting Frieren runtime status...
+          presence:
+            present: Present
+            missing: Missing
+          states:
+            invalid: Runtime needs attention
+            missing-config: Kokoro or RVC paths required
+            missing-env-file: Env file required
+            needs-install: Install or repair required
+            ready: Ready to start
+            running: Running
+          modes:
+            bundled: AIRI bundled runtime
+            external: External checkout
+          actions:
+            refresh: Refresh status
+            import-env: Import from env file
+            install-or-repair: Install or repair runtime
+            test-dual-llm: Test Dual LLM
+            restart: Restart sidecar
+          details:
+            mode: Launch mode
+            base-url: Base URL
+            dual-llm-api-key: Dual LLM API Key
+            dual-llm-base-url: Dual LLM Base URL
+            dual-llm-model: Dual LLM Model
+            bridge-dir: Bridge directory
+            runtime-root: Runtime root
+            source-path: Bundled source path
+            venv-path: Python virtualenv
+            env-file: Env file
+            bootstrap-log: Bootstrap log
+        import:
+          title: Imported configuration
+        dual-llm-test:
+          title: Dual LLM test result
+          duration: 'Duration: {durationMs} ms'
+        playground:
+          default-text: Hello. This is a test of the Frieren RVC sidecar voice.
       speech-noop:
         title: None
         description: No speech output.

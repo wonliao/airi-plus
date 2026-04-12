@@ -19,7 +19,7 @@ import type {
   ShortTermMemorySearchResult,
   ShortTermMemoryValidationPayload,
   ShortTermMemoryValidationResult,
-} from '@proj-airi/stage-shared'
+} from '@proj-airi/stage-shared/memory'
 import type { BrowserWindow, UtilityProcess } from 'electron'
 
 import process from 'node:process'
@@ -43,7 +43,7 @@ import {
   isAbsoluteFilesystemPath,
   isElectronManagedMemoryAlias,
   isElectronManagedRelativePath,
-} from '@proj-airi/stage-shared'
+} from '@proj-airi/stage-shared/memory'
 import { app, utilityProcess } from 'electron'
 
 function ensureTrailingSeparator(value: string) {
@@ -205,18 +205,19 @@ async function stopManagedLocalMem0Sidecar() {
   const current = managedLocalMem0SidecarState
   managedLocalMem0SidecarState = null
 
-  if (!current?.process || current.process.pid == null) {
+  const currentProcess = current?.process
+  if (!currentProcess || currentProcess.pid == null) {
     return
   }
 
-  current.process.kill()
+  currentProcess.kill()
   await Promise.race([
     new Promise<void>((resolvePromise) => {
-      current.process.once('exit', () => resolvePromise())
+      currentProcess.once('exit', () => resolvePromise())
     }),
     delay(2_000).then(() => {
-      if (current.process.pid != null) {
-        current.process.kill()
+      if (currentProcess.pid != null) {
+        currentProcess.kill()
       }
     }),
   ])
@@ -403,7 +404,8 @@ async function ensureManagedLocalMem0Sidecar(payload: {
       return electronManagedLocalMem0BaseUrl
     }
     catch (error) {
-      if (startupFailure?.includes('EADDRINUSE') && await isManagedLocalMem0SidecarReachable()) {
+      const startupFailureMessage = startupFailure ?? ''
+      if (startupFailureMessage.includes('EADDRINUSE') && await isManagedLocalMem0SidecarReachable()) {
         managedLocalMem0SidecarState = {
           configSignature,
         }

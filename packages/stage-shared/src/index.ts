@@ -1,6 +1,7 @@
 export * from './env-vars'
 export * from './environment'
 export * from './export-csv'
+export * from './frieren-speech'
 export * from './memory'
 export * from './openai-subscription'
 export * from './perf/tracer'

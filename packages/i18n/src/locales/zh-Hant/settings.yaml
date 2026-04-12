@@ -833,6 +833,86 @@ pages:
       deepgram-tts:
         description: deepgram.com
         title: Deepgram
+      frieren-rvc-sidecar:
+        description: 由 AIRI 管理、以 embedded Kokoro + RVC 運行的本機 sidecar。
+        title: Frieren RVC Sidecar
+        callout:
+          title: 由 AIRI 管理的本機 sidecar
+          description: AIRI 會以 embedded 模式啟動受管的本機 sidecar，把 bridge 維持在 localhost，並在語音播放前先完成驗證。你可以填入 bridge 目錄繼續沿用外部 checkout，也可以留空改用 AIRI 內建 source，並讓 AIRI 依照 Kokoro 與 RVC 路徑自動產生受管 env 檔。
+        fields:
+          field:
+            bridge-dir:
+              label: Bridge 目錄
+              description: 選填。外部 `frieren-rvc-bridge` checkout 的資料夾路徑，裡面需要包含 `run-local.sh`。留空時會改用 AIRI 內建的 sidecar source。
+              placeholder: 留空以使用 AIRI 內建 sidecar source
+            dual-llm-api-key:
+              label: Dual LLM API Key
+              description: 僅限 bundled 模式。這組 API Key 會被寫入受管的 `sidecar.env`，並以 `DUAL_LLM_API_KEY` 提供給文字回應流程。
+              placeholder: sk-...
+            dual-llm-base-url:
+              label: Dual LLM Base URL
+              description: 僅限 bundled 模式。這個 OpenAI 相容 Base URL 會被寫入受管的 `sidecar.env`，對應 `DUAL_LLM_BASE_URL`。
+              placeholder: https://api.openai.com/v1/
+            dual-llm-model:
+              label: Dual LLM Model
+              description: 僅限 bundled 模式。這個對話模型名稱會被寫入受管的 `sidecar.env`，對應 `DUAL_LLM_MODEL`。
+              placeholder: gpt-4.1-mini
+            kokoro-project-dir:
+              label: Kokoro 專案目錄
+              description: 僅限 bundled 模式。AIRI 會使用這份本機 `Kokoro-FastAPI` checkout 來做 embedded synthesis，並把路徑寫入受管的 `sidecar.env`。
+              placeholder: /path/to/Kokoro-FastAPI
+            rvc-model-path:
+              label: RVC 模型路徑
+              description: 僅限 bundled 模式。受管 Frieren sidecar 會使用這個 `.pth` 聲音模型檔。
+              placeholder: /path/to/Frieren_e720_s6480.pth
+            rvc-index-path:
+              label: RVC Index 路徑
+              description: 僅限 bundled 模式。與所選 RVC 模型配對的 `.index` 檔路徑。
+              placeholder: /path/to/added_IVF280_Flat_nprobe_1_Frieren_v2.index
+            env-file:
+              label: Env 檔案
+              description: 選填的進階覆寫。AIRI 啟動 sidecar 時會把這個路徑以 `ENV_FILE` 傳入。bundled 模式會優先使用上面的 Kokoro 與 RVC 結構化欄位，其次才回退到 AIRI runtime 目錄中的 `sidecar.env`。
+              placeholder: /path/to/frieren.env，或 AIRI runtime 底下的相對路徑
+        runtime:
+          loading: 正在檢查 Frieren runtime 狀態...
+          presence:
+            present: 已存在
+            missing: 缺少
+          states:
+            invalid: Runtime 需要處理
+            missing-config: 需要 Kokoro 或 RVC 路徑
+            missing-env-file: 需要 Env 檔案
+            needs-install: 需要安裝或修復
+            ready: 可隨時啟動
+            running: 執行中
+          modes:
+            bundled: AIRI 內建 runtime
+            external: 外部 checkout
+          actions:
+            refresh: 重新整理狀態
+            import-env: 從 env 檔匯入
+            install-or-repair: 安裝或修復 runtime
+            test-dual-llm: 測試 Dual LLM
+            restart: 重新啟動 sidecar
+          details:
+            mode: 啟動模式
+            base-url: Base URL
+            dual-llm-api-key: Dual LLM API Key
+            dual-llm-base-url: Dual LLM Base URL
+            dual-llm-model: Dual LLM Model
+            bridge-dir: Bridge 目錄
+            runtime-root: Runtime 根目錄
+            source-path: 內建 source 路徑
+            venv-path: Python 虛擬環境
+            env-file: Env 檔案
+            bootstrap-log: Bootstrap 日誌
+        import:
+          title: 已匯入的設定
+        dual-llm-test:
+          title: Dual LLM 測試結果
+          duration: '耗時：{durationMs} ms'
+        playground:
+          default-text: 您好，這是 Frieren RVC sidecar 的語音測試。
       speech-noop:
         title: 無
         description: 無語音輸出。

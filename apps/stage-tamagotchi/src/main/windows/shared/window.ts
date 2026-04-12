@@ -9,6 +9,7 @@ import { isRendererUnavailable } from '@proj-airi/electron-vueuse/main'
 import { isMacOS } from 'std-env'
 
 import { createServerChannelService } from '../../services/airi/channel-server'
+import { createFrierenSpeechService } from '../../services/airi/frieren-speech'
 import { createI18nService } from '../../services/airi/i18n'
 import { createMemoryValidationService } from '../../services/airi/memory-validation'
 import { createAppService, createPowerMonitorService, createScreenService, createWindowService } from '../../services/electron'
@@ -105,5 +106,6 @@ export async function setupBaseWindowElectronInvokes(params: {
   await createI18nService({ context: params.context, window: params.window, i18n: params.i18n })
 
   createServerChannelService({ serverChannel: params.serverChannel })
+  createFrierenSpeechService({ context: params.context, window: params.window })
   createMemoryValidationService({ context: params.context, window: params.window })
 }
