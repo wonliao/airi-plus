@@ -13,8 +13,6 @@ const { t } = useI18n()
 const clearStatusMessage = ref('')
 
 const {
-  appId,
-  agentId,
   autoCapture,
   autoRecall,
   backendId,
@@ -25,10 +23,8 @@ const {
   lastRecallDebug,
   lastValidation,
   openAIApiKey,
-  runId,
   searchThreshold,
   topK,
-  userId,
   validationStatus,
 } = storeToRefs(store)
 
@@ -103,34 +99,6 @@ async function clearRemoteShortTermMemory() {
                 {{ store.activeBaseUrl }}
               </div>
             </div>
-
-            <FieldInput
-              v-model="userId"
-              :label="$t('settings.pages.modules.memory-short-term.fields.userId.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.userId.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.userId.placeholder')"
-            />
-
-            <FieldInput
-              v-model="agentId"
-              :label="$t('settings.pages.modules.memory-short-term.fields.agentId.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.agentId.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.agentId.placeholder')"
-            />
-
-            <FieldInput
-              v-model="runId"
-              :label="$t('settings.pages.modules.memory-short-term.fields.runId.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.runId.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.runId.placeholder')"
-            />
-
-            <FieldInput
-              v-model="appId"
-              :label="$t('settings.pages.modules.memory-short-term.fields.appId.label')"
-              :description="$t('settings.pages.modules.memory-short-term.fields.appId.description')"
-              :placeholder="$t('settings.pages.modules.memory-short-term.fields.appId.placeholder')"
-            />
           </div>
         </div>
 
