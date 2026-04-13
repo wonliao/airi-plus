@@ -779,11 +779,11 @@ async function ensureManagedFrierenSpeechRuntime(payload: FrierenSpeechSidecarVa
         cwd: bootstrapWorkingDirectory,
         env: sanitizeFrierenShellEnv({
           env: {
-          ...process.env,
-          AIRI_FRIEREN_SIDECAR_RUNTIME_DIR: runtimePaths.rootPath,
-          ENV_FILE: bundledConfig.resolvedEnvFile,
-          PYTHON_BIN: process.env.PYTHON_BIN ?? '3.10',
-          VENV_DIR: runtimePaths.venvPath,
+            ...process.env,
+            AIRI_FRIEREN_SIDECAR_RUNTIME_DIR: runtimePaths.rootPath,
+            ENV_FILE: bundledConfig.resolvedEnvFile,
+            PYTHON_BIN: process.env.PYTHON_BIN ?? '3.10',
+            VENV_DIR: runtimePaths.venvPath,
           },
           runtimeRootPath: runtimePaths.rootPath,
           shellWorkingDirectory: bootstrapWorkingDirectory,
@@ -1046,17 +1046,17 @@ async function ensureManagedFrierenSpeechSidecar(payload: FrierenSpeechSidecarVa
       cwd: shellWorkingDirectory,
       env: sanitizeFrierenShellEnv({
         env: {
-        ...process.env,
-        HOST: parsedBaseUrl.hostname,
-        KOKORO_SYNTH_MODE: 'embedded',
-        PORT: parsedBaseUrl.port || '8010',
-        ...(launchConfig.resolvedEnvFile ? { ENV_FILE: launchConfig.resolvedEnvFile } : {}),
-        ...(launchConfig.runtimeRootPath
-          ? {
-              AIRI_FRIEREN_SIDECAR_RUNTIME_DIR: launchConfig.runtimeRootPath,
-              VENV_DIR: launchConfig.venvPath ?? resolve(launchConfig.runtimeRootPath, 'venv'),
-            }
-          : {}),
+          ...process.env,
+          HOST: parsedBaseUrl.hostname,
+          KOKORO_SYNTH_MODE: 'embedded',
+          PORT: parsedBaseUrl.port || '8010',
+          ...(launchConfig.resolvedEnvFile ? { ENV_FILE: launchConfig.resolvedEnvFile } : {}),
+          ...(launchConfig.runtimeRootPath
+            ? {
+                AIRI_FRIEREN_SIDECAR_RUNTIME_DIR: launchConfig.runtimeRootPath,
+                VENV_DIR: launchConfig.venvPath ?? resolve(launchConfig.runtimeRootPath, 'venv'),
+              }
+            : {}),
         },
         runtimeRootPath: launchConfig.runtimeRootPath,
         shellWorkingDirectory,

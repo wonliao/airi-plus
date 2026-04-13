@@ -2,9 +2,18 @@
 
 import type { Configuration } from 'electron-builder'
 
+import process from 'node:process'
+
 import { execSync } from 'node:child_process'
 
 import { isMacOS } from 'std-env'
+
+type ElectronBuilderProfile = 'dev' | 'release'
+
+function resolveElectronBuilderProfile(): ElectronBuilderProfile {
+  const value = process.env.AIRI_ELECTRON_BUILDER_PROFILE?.trim().toLowerCase()
+  return value === 'dev' ? 'dev' : 'release'
+}
 
 function hasXcode26OrAbove() {
   if (!isMacOS)
@@ -29,6 +38,8 @@ function hasXcode26OrAbove() {
  * This is friendly to developers whose macOS and/or Xcode versions are below 26.
  */
 const useIconFormattedMacAppIcon = hasXcode26OrAbove()
+const electronBuilderProfile = resolveElectronBuilderProfile()
+const isReleaseProfile = electronBuilderProfile === 'release'
 if (!useIconFormattedMacAppIcon) {
   console.warn('[electron-builder/config] Warning: Xcode version is below 26. Using .icns format for macOS app icon.')
 }
@@ -39,6 +50,7 @@ else {
   // machine-readable output such as `BUNDLE_NAME=$(...)`.
   console.warn('[electron-builder/config] Xcode version is 26 or above. Using .icon format for macOS app icon.')
 }
+console.warn(`[electron-builder/config] Using ${electronBuilderProfile} packaging profile.`)
 
 export default {
   appId: 'ai.moeru.airi',
@@ -125,10 +137,8 @@ export default {
     // an Apple Developer account, comment and uncomment the following 4 lines.
     // Later on when you obtained one, you can set up the necessary certificates and provisioning
     // profiles to enable these security features.
-    // hardenedRuntime: false,
-    hardenedRuntime: true,
-    // notarize: false,
-    notarize: true,
+    hardenedRuntime: isReleaseProfile,
+    notarize: isReleaseProfile,
     executableName: 'airi',
     icon: useIconFormattedMacAppIcon ? 'icon.icon' : 'icon.icns',
   },
