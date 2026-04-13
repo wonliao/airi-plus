@@ -28,6 +28,9 @@ export interface FrierenSpeechSidecarValidationPayload {
   dualLlmBaseUrl?: string
   dualLlmModel?: string
   envFile?: string
+  forceReinstall?: boolean
+  profilingResponseFormat?: 'mp3' | 'wav'
+  rvcDevice?: string
   kokoroProjectDir?: string
   rvcIndexPath?: string
   rvcModelPath?: string
@@ -52,6 +55,7 @@ export interface FrierenSpeechSidecarStatusResult {
   message: string
   resolvedBridgeDir: string
   resolvedEnvFile?: string
+  rvcDevice?: string
   validatedBaseUrl: string
   runtimeRootPath?: string
   sourcePath?: string
@@ -66,6 +70,7 @@ export interface FrierenSpeechSidecarImportedConfigResult {
   dualLlmBaseUrl?: string
   dualLlmModel?: string
   resolvedEnvFile?: string
+  rvcDevice?: string
   kokoroProjectDir?: string
   rvcModelPath?: string
   rvcIndexPath?: string
@@ -79,12 +84,37 @@ export interface FrierenSpeechDualLlmTestResult {
   statusCode?: number
 }
 
+export interface FrierenSpeechProfilingTimings {
+  totalMs?: number
+  dualTextMs?: number
+  llmMs?: number
+  kokoroMs?: number
+  rvcMs?: number
+  encodeMs?: number
+  dualCacheHit?: boolean
+}
+
+export interface FrierenSpeechProfilingSample {
+  durationMs: number
+  responsePreview?: string
+  statusCode?: number
+  timings: FrierenSpeechProfilingTimings
+}
+
+export interface FrierenSpeechProfilingResult {
+  success: boolean
+  message: string
+  speech?: FrierenSpeechProfilingSample
+  text?: FrierenSpeechProfilingSample
+}
+
 export const electronValidateFrierenSpeechSidecar = defineInvokeEventa<FrierenSpeechSidecarValidationResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:validate')
 export const electronGetFrierenSpeechSidecarStatus = defineInvokeEventa<FrierenSpeechSidecarStatusResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:get-status')
 export const electronInstallFrierenSpeechSidecar = defineInvokeEventa<FrierenSpeechSidecarStatusResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:install')
 export const electronRestartFrierenSpeechSidecar = defineInvokeEventa<FrierenSpeechSidecarStatusResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:restart')
 export const electronImportFrierenSpeechSidecarConfig = defineInvokeEventa<FrierenSpeechSidecarImportedConfigResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:import-config')
 export const electronTestFrierenSpeechDualLlm = defineInvokeEventa<FrierenSpeechDualLlmTestResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:test-dual-llm')
+export const electronProfileFrierenSpeechOnDesktop = defineInvokeEventa<FrierenSpeechProfilingResult, FrierenSpeechSidecarValidationPayload>('eventa:invoke:electron:speech:frieren-sidecar:profile')
 
 export async function validateFrierenSpeechSidecarOnDesktop(payload: FrierenSpeechSidecarValidationPayload) {
   const context = await createFrierenSpeechRendererContext()
@@ -144,4 +174,14 @@ export async function testFrierenSpeechDualLlmOnDesktop(payload: FrierenSpeechSi
 
   const testDualLlm = defineInvoke(context, electronTestFrierenSpeechDualLlm)
   return testDualLlm(payload)
+}
+
+export async function profileFrierenSpeechOnDesktop(payload: FrierenSpeechSidecarValidationPayload) {
+  const context = await createFrierenSpeechRendererContext()
+  if (!context) {
+    return undefined
+  }
+
+  const profileSpeech = defineInvoke(context, electronProfileFrierenSpeechOnDesktop)
+  return profileSpeech(payload)
 }

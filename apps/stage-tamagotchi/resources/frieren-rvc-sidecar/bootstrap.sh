@@ -7,6 +7,14 @@ VENV_DIR="${VENV_DIR:-$RUNTIME_ROOT/venv}"
 ENV_FILE="${ENV_FILE:-$RUNTIME_ROOT/sidecar.env}"
 PYTHON_BIN="${PYTHON_BIN:-3.10}"
 KOKORO_PROJECT_DIR="${KOKORO_PROJECT_DIR:-}"
+STABLE_CWD="${RUNTIME_ROOT}"
+
+# NOTICE: AIRI may re-expand the managed source directory in-place during upgrades.
+# Reset the shell cwd and PWD immediately so brew/child shells don't inherit a deleted path.
+mkdir -p "$STABLE_CWD"
+cd "$STABLE_CWD"
+export PWD="$STABLE_CWD"
+export OLDPWD="$RUNTIME_ROOT"
 
 if [[ -f "$ENV_FILE" ]]; then
   set -a
@@ -134,23 +142,14 @@ echo "Installing rvc..."
 "$VENV_DIR/bin/python" -m pip install --no-deps rvc==0.3.5
 
 echo "Validating critical Python imports..."
-PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_DIR/bin/python" -u - <<'PY'
-import av
-import faiss
-import fairseq
-import fastapi
-import pydub
-import rvc
-import soundfile
+for module in torch av faiss fairseq fastapi pydub rvc soundfile; do
+  PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_DIR/bin/python" -u - <<PY
+import importlib
 
-print("ok av")
-print("ok faiss")
-print("ok fairseq")
-print("ok fastapi")
-print("ok pydub")
-print("ok rvc")
-print("ok soundfile")
+importlib.import_module("$module")
+print("ok $module")
 PY
+done
 
 PYTHONPATH="$SCRIPT_DIR" "$VENV_DIR/bin/python" -u - <<'PY'
 import app

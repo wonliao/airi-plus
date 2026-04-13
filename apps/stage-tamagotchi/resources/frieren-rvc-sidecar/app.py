@@ -131,6 +131,7 @@ RVC_FILTER_RADIUS = int(os.getenv("RVC_FILTER_RADIUS", "3"))
 RVC_RMS_MIX_RATE = float(os.getenv("RVC_RMS_MIX_RATE", "0.25"))
 RVC_PROTECT = float(os.getenv("RVC_PROTECT", "0.33"))
 RVC_WARMUP_TEXT = os.getenv("RVC_WARMUP_TEXT", "こんにちは。")
+RVC_DEVICE_OVERRIDE = os.getenv("FORCE_RVC_DEVICE", "").strip().lower()
 RVC_PRELOAD_MODEL = os.getenv("RVC_PRELOAD_MODEL", "true").strip().lower() in {"1", "true", "yes", "on"}
 RVC_ENABLE_WARMUP = os.getenv("RVC_ENABLE_WARMUP", "true").strip().lower() in {"1", "true", "yes", "on"}
 RVC_CLEANUP_RESOURCE_TRACKERS = os.getenv("RVC_CLEANUP_RESOURCE_TRACKERS", "false").strip().lower() in {"1", "true", "yes", "on"}
@@ -169,6 +170,27 @@ class DualSpeechResponse(BaseModel):
     media_type: str
 
 
+def timing_header_value(duration_seconds: float) -> str:
+    return f"{duration_seconds * 1000:.3f}"
+
+
+def apply_timing_headers(response: Response, timings: dict[str, float], cache_hit: bool | None = None) -> None:
+    response.headers["X-Frieren-Timing-Total-Ms"] = timing_header_value(timings["total"])
+
+    if "dual_text" in timings:
+        response.headers["X-Frieren-Timing-Dual-Text-Ms"] = timing_header_value(timings["dual_text"])
+    if "llm" in timings:
+        response.headers["X-Frieren-Timing-Llm-Ms"] = timing_header_value(timings["llm"])
+    if "kokoro" in timings:
+        response.headers["X-Frieren-Timing-Kokoro-Ms"] = timing_header_value(timings["kokoro"])
+    if "rvc" in timings:
+        response.headers["X-Frieren-Timing-Rvc-Ms"] = timing_header_value(timings["rvc"])
+    if "encode" in timings:
+        response.headers["X-Frieren-Timing-Encode-Ms"] = timing_header_value(timings["encode"])
+    if cache_hit is not None:
+        response.headers["X-Frieren-Dual-Cache-Hit"] = "1" if cache_hit else "0"
+
+
 app = FastAPI(title="Frieren RVC Bridge")
 app.add_middleware(
     CORSMiddleware,
@@ -188,6 +210,19 @@ kokoro_pipelines: dict[str, Any] = {}
 kokoro_preloaded = False
 kokoro_init_lock: asyncio.Lock | None = None
 kokoro_request_lock: asyncio.Lock | None = None
+
+
+def normalize_rvc_device_override(raw_override: str) -> str:
+    if raw_override != "mps":
+        return raw_override
+
+    logger.warning(
+        "FORCE_RVC_DEVICE=mps requested, but the current managed Frieren runtime is unstable on MPS. Using cpu instead."
+    )
+    return "cpu"
+
+
+EFFECTIVE_RVC_DEVICE_OVERRIDE = normalize_rvc_device_override(RVC_DEVICE_OVERRIDE)
 
 
 def build_dual_schema() -> dict:
@@ -433,13 +468,18 @@ def extract_dual_payload(response_json: dict) -> DualTextResponse:
         raise HTTPException(status_code=502, detail="LLM response missing required fields") from exc
 
 
-def generate_dual_text(user_input: str) -> DualTextResponse:
+def generate_dual_text_with_metrics(user_input: str) -> tuple[DualTextResponse, dict[str, float], bool]:
+    total_started_at = time.perf_counter()
+
     if not DUAL_LLM_API_KEY:
         raise HTTPException(status_code=500, detail="Missing DUAL_LLM_API_KEY")
 
     cached = get_cached_dual_text(user_input)
     if cached is not None:
-        return cached
+        return cached, {
+            "llm": 0.0,
+            "total": time.perf_counter() - total_started_at,
+        }, True
 
     headers = {
         "Authorization": f"Bearer {DUAL_LLM_API_KEY}",
@@ -457,6 +497,7 @@ def generate_dual_text(user_input: str) -> DualTextResponse:
         },
     }
 
+    llm_started_at = time.perf_counter()
     response = requests.post(
         f"{DUAL_LLM_BASE_URL}/chat/completions",
         headers=headers,
@@ -475,6 +516,16 @@ def generate_dual_text(user_input: str) -> DualTextResponse:
 
     result = extract_dual_payload(response.json())
     set_cached_dual_text(user_input, result)
+    total_elapsed = time.perf_counter() - total_started_at
+    llm_elapsed = time.perf_counter() - llm_started_at
+    return result, {
+        "llm": llm_elapsed,
+        "total": total_elapsed,
+    }, False
+
+
+def generate_dual_text(user_input: str) -> DualTextResponse:
+    result, _, _ = generate_dual_text_with_metrics(user_input)
     return result
 
 
@@ -572,9 +623,118 @@ def initialize_rvc() -> None:
     from rvc.modules.vc.utils import load_hubert
 
     engine = VC()
+    apply_rvc_device_override(engine)
     engine.get_vc(str(RVC_MODEL_PATH))
     engine.hubert_model = load_hubert(engine.config, str(RVC_HUBERT_PATH))
     rvc_engine = engine
+
+
+def resolve_rvc_device_override() -> str | None:
+    if not EFFECTIVE_RVC_DEVICE_OVERRIDE or EFFECTIVE_RVC_DEVICE_OVERRIDE == "auto":
+        return None
+    return EFFECTIVE_RVC_DEVICE_OVERRIDE
+
+
+def should_skip_rvc_startup_preload() -> bool:
+    return RVC_DEVICE_OVERRIDE == "mps"
+
+
+def should_force_subprocess_rvc() -> bool:
+    return False
+
+
+def get_rvc_device_layout(is_half: bool) -> tuple[int, int, int, int]:
+    if is_half:
+        return 3, 10, 60, 65
+    return 1, 6, 38, 41
+
+
+def probe_rvc_device_support(device: str) -> tuple[bool, str]:
+    probe_code = """
+import os
+from rvc.modules.vc.modules import VC
+from rvc.modules.vc.utils import load_hubert
+
+device = os.environ["RVC_PROBE_DEVICE"]
+model_path = os.environ["RVC_MODEL_PATH"]
+hubert_path = os.environ["RVC_HUBERT_PATH"]
+
+engine = VC()
+engine.config.device = device
+engine.config.instead = device
+engine.config.is_half = False
+engine.config.x_pad, engine.config.x_query, engine.config.x_center, engine.config.x_max = (1, 6, 38, 41)
+engine.config.use_fp32_config()
+engine.get_vc(model_path)
+engine.hubert_model = load_hubert(engine.config, hubert_path)
+print("ok")
+"""
+
+    probe_env = os.environ.copy()
+    probe_env["RVC_PROBE_DEVICE"] = device
+    result = subprocess.run(
+        [sys.executable, "-c", probe_code],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=probe_env,
+        timeout=180,
+    )
+
+    if result.returncode == 0:
+        return True, result.stdout.strip() or "ok"
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    reason = stderr or stdout or f"probe exited with code {result.returncode}"
+    return False, reason[-1000:]
+
+
+def resolve_forced_rvc_device() -> tuple[str | None, bool]:
+    override = resolve_rvc_device_override()
+    if override is None:
+        return None, False
+
+    import torch
+
+    if override == "cpu":
+        return "cpu", False
+
+    if override == "mps":
+        if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+            logger.warning("FORCE_RVC_DEVICE=mps requested, but PyTorch MPS is unavailable. Falling back to cpu.")
+            return "cpu", False
+
+        logger.warning(
+            "FORCE_RVC_DEVICE=mps requested, but the current managed Frieren runtime is unstable on MPS. Falling back to cpu."
+        )
+        return "cpu", False
+
+    if override == "cuda" or override.startswith("cuda:"):
+        if not torch.cuda.is_available():
+            logger.warning("FORCE_RVC_DEVICE=%s requested, but CUDA is unavailable. Falling back to cpu.", override)
+            return "cpu", False
+        return ("cuda:0" if override == "cuda" else override), True
+
+    raise RuntimeError(
+        f"Unsupported FORCE_RVC_DEVICE={override!r}. Expected auto, cpu, mps, cuda, or cuda:N"
+    )
+
+
+def apply_rvc_device_override(engine: Any) -> None:
+    device, is_half = resolve_forced_rvc_device()
+    if device is None:
+        return
+
+    engine.config.device = device
+    engine.config.instead = device
+    engine.config.is_half = is_half
+    engine.config.x_pad, engine.config.x_query, engine.config.x_center, engine.config.x_max = get_rvc_device_layout(is_half)
+
+    if not is_half:
+        engine.config.use_fp32_config()
+
+    logger.info("Using forced RVC device override: %s (is_half=%s)", device, is_half)
 
 
 def unload_rvc() -> None:
@@ -669,24 +829,47 @@ def schedule_resource_tracker_cleanup(delay_seconds: float = 0.5) -> None:
 
 
 def run_rvc(input_wav: Path, output_wav: Path) -> None:
-    if RVC_EXECUTION_MODE == "subprocess":
+    if RVC_EXECUTION_MODE == "subprocess" or should_force_subprocess_rvc():
         worker_script = Path(__file__).with_name("rvc_worker.py")
-        worker_env = os.environ.copy()
-        worker_env["RVC_EXECUTION_MODE"] = "inprocess"
+        base_worker_env = os.environ.copy()
+        base_worker_env["RVC_EXECUTION_MODE"] = "inprocess"
 
-        result = subprocess.run(
-            [sys.executable, str(worker_script), str(input_wav), str(output_wav)],
-            env=worker_env,
-            capture_output=True,
-            text=True,
-            timeout=RVC_SUBPROCESS_TIMEOUT,
-            check=False,
-        )
+        def run_rvc_worker(device_override: str | None) -> subprocess.CompletedProcess[str]:
+            worker_env = base_worker_env.copy()
+            if device_override:
+                worker_env["FORCE_RVC_DEVICE"] = device_override
+            else:
+                worker_env.pop("FORCE_RVC_DEVICE", None)
+
+            return subprocess.run(
+                [sys.executable, str(worker_script), str(input_wav), str(output_wav)],
+                env=worker_env,
+                capture_output=True,
+                text=True,
+                timeout=RVC_SUBPROCESS_TIMEOUT,
+                check=False,
+            )
+
+        requested_override = resolve_rvc_device_override()
+        attempted_device = requested_override
+        result = run_rvc_worker(requested_override)
+
+        if (result.returncode != 0 or not output_wav.exists()) and requested_override == "mps":
+            logger.warning(
+                "RVC subprocess failed on mps; retrying on cpu. returncode=%s stderr=%s",
+                result.returncode,
+                (result.stderr or "").strip()[-1000:],
+            )
+            output_wav.unlink(missing_ok=True)
+            attempted_device = "cpu"
+            result = run_rvc_worker("cpu")
+
         if result.returncode != 0:
             raise HTTPException(
                 status_code=500,
                 detail={
                     "message": "RVC subprocess failed",
+                    "device": attempted_device or "auto",
                     "returncode": result.returncode,
                     "stdout": result.stdout[-1000:],
                     "stderr": result.stderr[-1000:],
@@ -695,7 +878,7 @@ def run_rvc(input_wav: Path, output_wav: Path) -> None:
         if not output_wav.exists():
             raise HTTPException(
                 status_code=500,
-                detail="RVC subprocess finished without output audio",
+                detail=f"RVC subprocess finished without output audio on {attempted_device or 'auto'}",
             )
         cleanup_resource_trackers()
         schedule_resource_tracker_cleanup()
@@ -766,6 +949,14 @@ async def startup() -> None:
     if KOKORO_SYNTH_MODE not in {"http", "embedded"}:
         raise RuntimeError(f"Unsupported KOKORO_SYNTH_MODE: {KOKORO_SYNTH_MODE}")
 
+    logger.warning(
+        "Frieren startup config: kokoro_preload=%s, kokoro_unload_after_request=%s, rvc_preload=%s, rvc_warmup=%s, rvc_device_override=%s",
+        KOKORO_PRELOAD_MODEL,
+        KOKORO_UNLOAD_AFTER_REQUEST,
+        RVC_PRELOAD_MODEL,
+        RVC_ENABLE_WARMUP,
+        f"{RVC_DEVICE_OVERRIDE or 'auto'} -> {EFFECTIVE_RVC_DEVICE_OVERRIDE or 'auto'}",
+    )
     ensure_rvc_env()
     if not RVC_MODEL_PATH.exists():
         raise RuntimeError(f"Missing RVC model: {RVC_MODEL_PATH}")
@@ -775,9 +966,15 @@ async def startup() -> None:
         ensure_embedded_kokoro_env()
         if KOKORO_PRELOAD_MODEL:
             await ensure_embedded_kokoro_model(preload=True)
-    if RVC_EXECUTION_MODE != "subprocess" and (RVC_PRELOAD_MODEL or RVC_ENABLE_WARMUP):
+    skip_rvc_startup_preload = should_skip_rvc_startup_preload()
+    if skip_rvc_startup_preload:
+        logger.warning(
+            "Skipping RVC preload and warmup during startup because FORCE_RVC_DEVICE=%s is experimental on this runtime",
+            RVC_DEVICE_OVERRIDE,
+        )
+    if RVC_EXECUTION_MODE != "subprocess" and not skip_rvc_startup_preload and (RVC_PRELOAD_MODEL or RVC_ENABLE_WARMUP):
         initialize_rvc()
-    if RVC_EXECUTION_MODE != "subprocess" and RVC_ENABLE_WARMUP:
+    if RVC_EXECUTION_MODE != "subprocess" and not skip_rvc_startup_preload and RVC_ENABLE_WARMUP:
         await warmup_rvc()
     cleanup_resource_trackers()
 
@@ -798,13 +995,16 @@ def list_voices() -> dict[str, list[str]]:
 
 
 @app.post("/v1/dual/text", response_model=DualTextResponse)
-def create_dual_text(request: DualTextRequest) -> DualTextResponse:
-    return generate_dual_text(request.input)
+def create_dual_text(request: DualTextRequest, response: Response) -> DualTextResponse:
+    result, timings, cache_hit = generate_dual_text_with_metrics(request.input)
+    apply_timing_headers(response, timings, cache_hit)
+    return result
 
 
 @app.post("/v1/dual/speech", response_model=DualSpeechResponse)
-async def create_dual_speech(request: DualSpeechRequest) -> DualSpeechResponse:
-    dual_text = await asyncio.to_thread(generate_dual_text, request.input)
+async def create_dual_speech(request: DualSpeechRequest, response: Response) -> DualSpeechResponse:
+    total_started_at = time.perf_counter()
+    dual_text, dual_text_timings, cache_hit = await asyncio.to_thread(generate_dual_text_with_metrics, request.input)
     ensure_rvc_env()
     voice = kokoro_voice(request.voice)
 
@@ -814,15 +1014,29 @@ async def create_dual_speech(request: DualSpeechRequest) -> DualSpeechResponse:
             base_wav = tmp_path / "base.wav"
             converted_wav = tmp_path / "converted.wav"
 
+            kokoro_started_at = time.perf_counter()
             await synthesize_base_wav(dual_text.speech_text, voice, request.speed, base_wav)
+            kokoro_elapsed = time.perf_counter() - kokoro_started_at
+            rvc_started_at = time.perf_counter()
             await asyncio.to_thread(run_rvc, base_wav, converted_wav)
+            rvc_elapsed = time.perf_counter() - rvc_started_at
+            encode_started_at = time.perf_counter()
             audio_bytes, media_type = await asyncio.to_thread(
                 encode_audio, converted_wav, request.response_format
             )
+            encode_elapsed = time.perf_counter() - encode_started_at
     finally:
         if RVC_UNLOAD_AFTER_REQUEST:
             unload_rvc()
 
+    apply_timing_headers(response, {
+        "dual_text": dual_text_timings["total"],
+        "llm": dual_text_timings["llm"],
+        "kokoro": kokoro_elapsed,
+        "rvc": rvc_elapsed,
+        "encode": encode_elapsed,
+        "total": time.perf_counter() - total_started_at,
+    }, cache_hit)
     return DualSpeechResponse(
         display_text=dual_text.display_text,
         speech_text=dual_text.speech_text,
@@ -837,6 +1051,7 @@ async def create_speech(request: SpeechRequest) -> Response:
     if request.model not in {"frieren-rvc", "kokoro-rvc-frieren"}:
         raise HTTPException(status_code=400, detail=f"Unsupported model: {request.model}")
 
+    total_started_at = time.perf_counter()
     ensure_rvc_env()
     voice = kokoro_voice(request.voice)
 
@@ -846,12 +1061,25 @@ async def create_speech(request: SpeechRequest) -> Response:
             base_wav = tmp_path / "base.wav"
             converted_wav = tmp_path / "converted.wav"
 
+            kokoro_started_at = time.perf_counter()
             await synthesize_base_wav(request.input, voice, request.speed, base_wav)
+            kokoro_elapsed = time.perf_counter() - kokoro_started_at
+            rvc_started_at = time.perf_counter()
             await asyncio.to_thread(run_rvc, base_wav, converted_wav)
+            rvc_elapsed = time.perf_counter() - rvc_started_at
+            encode_started_at = time.perf_counter()
             audio_bytes, media_type = await asyncio.to_thread(
                 encode_audio, converted_wav, request.response_format
             )
-            return Response(content=audio_bytes, media_type=media_type)
+            encode_elapsed = time.perf_counter() - encode_started_at
+            response = Response(content=audio_bytes, media_type=media_type)
+            apply_timing_headers(response, {
+                "kokoro": kokoro_elapsed,
+                "rvc": rvc_elapsed,
+                "encode": encode_elapsed,
+                "total": time.perf_counter() - total_started_at,
+            })
+            return response
     finally:
         if RVC_UNLOAD_AFTER_REQUEST:
             unload_rvc()

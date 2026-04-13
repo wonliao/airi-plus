@@ -3,6 +3,9 @@ import type { ChildProcess } from 'node:child_process'
 import type { createContext } from '@moeru/eventa/adapters/electron/main'
 import type {
   FrierenSpeechDualLlmTestResult,
+  FrierenSpeechProfilingResult,
+  FrierenSpeechProfilingSample,
+  FrierenSpeechProfilingTimings,
   FrierenSpeechSidecarImportedConfigResult,
   FrierenSpeechSidecarStatusResult,
   FrierenSpeechSidecarValidationPayload,
@@ -24,6 +27,7 @@ import {
   electronGetFrierenSpeechSidecarStatus,
   electronImportFrierenSpeechSidecarConfig,
   electronInstallFrierenSpeechSidecar,
+  electronProfileFrierenSpeechOnDesktop,
   electronRestartFrierenSpeechSidecar,
   electronTestFrierenSpeechDualLlm,
   electronValidateFrierenSpeechSidecar,
@@ -35,7 +39,8 @@ const frierenSpeechSidecarStartupTimeoutMsec = 15_000
 const frierenSpeechSidecarStartupLockTimeoutMsec = 15_000
 const frierenSpeechBootstrapTimeoutMsec = 10 * 60_000
 const frierenSpeechDualLlmTestTimeoutMsec = 30_000
-const frierenSpeechManagedRuntimeVersion = 1
+const frierenSpeechProfilingTimeoutMsec = 60_000
+const frierenSpeechManagedRuntimeVersion = 12
 const frierenSpeechBundledSourceDirName = 'frieren-rvc-sidecar'
 const frierenSpeechBootstrapLogFileName = 'bootstrap.log'
 const loopbackHostnames = new Set(['127.0.0.1', 'localhost'])
@@ -84,6 +89,7 @@ interface ResolvedFrierenSpeechBundledConfig {
   envFileMode: 'generated-from-fields' | 'provided-env-file'
   kokoroProjectDir?: string
   resolvedEnvFile: string
+  rvcDevice?: string
   rvcIndexPath?: string
   rvcModelPath?: string
 }
@@ -99,6 +105,10 @@ function joinUserDataPath(...paths: string[]) {
 
 function getManagedFrierenSpeechStartupLockPath() {
   return joinUserDataPath('frieren-rvc-sidecar-startup.lock')
+}
+
+function getManagedFrierenSpeechStartupLockOwnerPath() {
+  return resolve(getManagedFrierenSpeechStartupLockPath(), 'owner.json')
 }
 
 function getManagedFrierenSpeechRuntimeRootPath() {
@@ -218,6 +228,7 @@ async function writeManagedFrierenSpeechBundledEnvFile(params: {
   dualLlmModel?: string
   kokoroProjectDir: string
   resolvedEnvFile: string
+  rvcDevice?: string
   runtimeRootPath: string
   rvcIndexPath: string
   rvcModelPath: string
@@ -225,12 +236,14 @@ async function writeManagedFrierenSpeechBundledEnvFile(params: {
   const trimmedDualLlmApiKey = readTrimmedPath(params.dualLlmApiKey)
   const trimmedDualLlmBaseUrl = readTrimmedPath(params.dualLlmBaseUrl)
   const trimmedDualLlmModel = readTrimmedPath(params.dualLlmModel)
+  const trimmedRvcDevice = readTrimmedPath(params.rvcDevice)
   const lines = [
     `KOKORO_PROJECT_DIR=${toShellEnvValue(params.kokoroProjectDir)}`,
     `RVC_MODEL_PATH=${toShellEnvValue(params.rvcModelPath)}`,
     `RVC_INDEX_PATH=${toShellEnvValue(params.rvcIndexPath)}`,
     `RVC_WORKDIR=${toShellEnvValue(resolve(params.runtimeRootPath, 'workdir'))}`,
     `RVC_ASSETS_DIR=${toShellEnvValue(resolve(params.runtimeRootPath, 'assets'))}`,
+    ...(trimmedRvcDevice ? [`FORCE_RVC_DEVICE=${toShellEnvValue(trimmedRvcDevice)}`] : []),
     ...(trimmedDualLlmApiKey ? [`DUAL_LLM_API_KEY=${toShellEnvValue(trimmedDualLlmApiKey)}`] : []),
     ...(trimmedDualLlmBaseUrl ? [`DUAL_LLM_BASE_URL=${toShellEnvValue(trimmedDualLlmBaseUrl)}`] : []),
     ...(trimmedDualLlmModel ? [`DUAL_LLM_MODEL=${toShellEnvValue(trimmedDualLlmModel)}`] : []),
@@ -249,6 +262,7 @@ function createFrierenSpeechStatusResult(params: {
   message: string
   resolvedBridgeDir: string
   resolvedEnvFile?: string
+  rvcDevice?: string
   runtimeRootPath?: string
   sourcePath?: string
   status: FrierenSpeechSidecarStatusResult['status']
@@ -263,6 +277,7 @@ function createFrierenSpeechStatusResult(params: {
     message: params.message,
     resolvedBridgeDir: params.resolvedBridgeDir,
     ...(params.resolvedEnvFile ? { resolvedEnvFile: params.resolvedEnvFile } : {}),
+    ...(params.rvcDevice ? { rvcDevice: params.rvcDevice } : {}),
     ...(params.runtimeRootPath ? { runtimeRootPath: params.runtimeRootPath } : {}),
     ...(params.runtimeRootPath ? { bootstrapLogPath: getManagedFrierenSpeechBootstrapLogPath(params.runtimeRootPath) } : {}),
     ...(params.sourcePath ? { sourcePath: params.sourcePath } : {}),
@@ -272,12 +287,13 @@ function createFrierenSpeechStatusResult(params: {
   }
 }
 
-async function readFrierenSpeechDualLlmRuntimeConfig(resolvedEnvFile: string | undefined) {
+async function readFrierenSpeechRuntimeEnvConfig(resolvedEnvFile: string | undefined) {
   if (!resolvedEnvFile || !(await isReadableFile(resolvedEnvFile))) {
     return {
       dualLlmApiKeyConfigured: false,
       dualLlmBaseUrl: undefined,
       dualLlmModel: undefined,
+      rvcDevice: undefined,
     }
   }
 
@@ -286,11 +302,13 @@ async function readFrierenSpeechDualLlmRuntimeConfig(resolvedEnvFile: string | u
   const dualLlmApiKey = readTrimmedPath(parsed.get('DUAL_LLM_API_KEY'))
   const dualLlmBaseUrl = readTrimmedPath(parsed.get('DUAL_LLM_BASE_URL'))
   const dualLlmModel = readTrimmedPath(parsed.get('DUAL_LLM_MODEL'))
+  const rvcDevice = readTrimmedPath(parsed.get('FORCE_RVC_DEVICE'))
 
   return {
     dualLlmApiKeyConfigured: !!dualLlmApiKey,
     ...(dualLlmBaseUrl ? { dualLlmBaseUrl } : {}),
     ...(dualLlmModel ? { dualLlmModel } : {}),
+    ...(rvcDevice ? { rvcDevice } : {}),
   }
 }
 
@@ -397,7 +415,10 @@ async function runManagedFrierenShellScript(params: {
 
     const child = spawn('bash', [params.scriptPath], {
       cwd: params.cwd,
-      env: params.env,
+      env: sanitizeFrierenShellEnv({
+        env: params.env,
+        shellWorkingDirectory: params.cwd,
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -454,6 +475,42 @@ async function runManagedFrierenShellScript(params: {
       rejectPromise(new Error(combinedOutput || `Frieren ${params.label} exited with code ${code ?? 'null'}.`))
     })
   })
+}
+
+function resolveFrierenShellWorkingDirectory(params: {
+  launchMode?: 'bundled' | 'external'
+  resolvedBridgeDir?: string
+  runtimeRootPath?: string
+}) {
+  if (params.launchMode === 'bundled' && params.runtimeRootPath) {
+    return params.runtimeRootPath
+  }
+
+  if (params.resolvedBridgeDir) {
+    return params.resolvedBridgeDir
+  }
+
+  return app.getPath('home')
+}
+
+function sanitizeFrierenShellEnv(params: {
+  env: NodeJS.ProcessEnv
+  shellWorkingDirectory: string
+  runtimeRootPath?: string
+}) {
+  const nextEnv = {
+    ...params.env,
+  }
+
+  delete nextEnv.INIT_CWD
+  delete nextEnv.OLDPWD
+  delete nextEnv.PWD
+
+  return {
+    ...nextEnv,
+    OLDPWD: params.runtimeRootPath ?? params.shellWorkingDirectory,
+    PWD: params.shellWorkingDirectory,
+  }
 }
 
 async function runCommandCapture(command: string, args: string[]) {
@@ -616,12 +673,14 @@ async function resolveManagedFrierenSpeechBundledConfig(
   const dualLlmApiKey = readTrimmedPath(payload.dualLlmApiKey)
   const dualLlmBaseUrl = readTrimmedPath(payload.dualLlmBaseUrl)
   const dualLlmModel = readTrimmedPath(payload.dualLlmModel)
+  const rvcDevice = readTrimmedPath(payload.rvcDevice)
   let kokoroProjectDir = readTrimmedPath(payload.kokoroProjectDir)
   let rvcModelPath = readTrimmedPath(payload.rvcModelPath)
   let rvcIndexPath = readTrimmedPath(payload.rvcIndexPath)
   const hasDualLlmFields = !!dualLlmApiKey || !!dualLlmBaseUrl || !!dualLlmModel
+  const hasRvcDeviceField = !!rvcDevice
 
-  if (!kokoroProjectDir && !rvcModelPath && !rvcIndexPath && hasDualLlmFields) {
+  if (!kokoroProjectDir && !rvcModelPath && !rvcIndexPath && (hasDualLlmFields || hasRvcDeviceField)) {
     const envFileState = await resolveManagedFrierenSpeechEnvFileState(runtimeRootPath, payload.envFile)
     if (!envFileState.missing) {
       const content = await readFile(envFileState.resolvedEnvFile, 'utf8')
@@ -632,7 +691,7 @@ async function resolveManagedFrierenSpeechBundledConfig(
     }
   }
 
-  if (kokoroProjectDir || rvcModelPath || rvcIndexPath || hasDualLlmFields) {
+  if (kokoroProjectDir || rvcModelPath || rvcIndexPath || hasDualLlmFields || hasRvcDeviceField) {
     if (!kokoroProjectDir || !rvcModelPath || !rvcIndexPath) {
       throw new Error('Bundled Frieren sidecar requires Kokoro project directory, RVC model path, and RVC index path together.')
     }
@@ -651,6 +710,7 @@ async function resolveManagedFrierenSpeechBundledConfig(
       ...(dualLlmModel ? { dualLlmModel } : {}),
       kokoroProjectDir: resolvedKokoroProjectDir,
       resolvedEnvFile,
+      ...(rvcDevice ? { rvcDevice } : {}),
       runtimeRootPath,
       rvcIndexPath: resolvedRvcIndexPath,
       rvcModelPath: resolvedRvcModelPath,
@@ -663,6 +723,7 @@ async function resolveManagedFrierenSpeechBundledConfig(
       envFileMode: 'generated-from-fields',
       kokoroProjectDir: resolvedKokoroProjectDir,
       resolvedEnvFile,
+      ...(rvcDevice ? { rvcDevice } : {}),
       rvcIndexPath: resolvedRvcIndexPath,
       rvcModelPath: resolvedRvcModelPath,
     }
@@ -682,9 +743,10 @@ async function resolveManagedFrierenSpeechBundledConfig(
 async function ensureManagedFrierenSpeechRuntime(payload: FrierenSpeechSidecarValidationPayload): Promise<ResolvedManagedFrierenSpeechRuntime> {
   const runtimePaths = await ensureManagedFrierenSpeechRuntimeExpanded()
   const bundledConfig = await resolveManagedFrierenSpeechBundledConfig(runtimePaths.rootPath, payload)
+  const forceReinstall = payload.forceReinstall === true
 
   const managedPythonPath = resolve(runtimePaths.venvPath, 'bin/python')
-  if (runtimePaths.state?.runtimeVersion === frierenSpeechManagedRuntimeVersion) {
+  if (!forceReinstall && runtimePaths.state?.runtimeVersion === frierenSpeechManagedRuntimeVersion) {
     try {
       await assertReadableFile(managedPythonPath, 'Managed Frieren runtime python')
       return {
@@ -709,15 +771,23 @@ async function ensureManagedFrierenSpeechRuntime(payload: FrierenSpeechSidecarVa
   const bootstrapLogPath = getManagedFrierenSpeechBootstrapLogPath(runtimePaths.rootPath)
   managedFrierenSpeechRuntimeBootstrapPromise = (async () => {
     try {
+      const bootstrapWorkingDirectory = resolveFrierenShellWorkingDirectory({
+        launchMode: 'bundled',
+        runtimeRootPath: runtimePaths.rootPath,
+      })
       const bootstrapResult = await runManagedFrierenShellScript({
-        cwd: runtimePaths.sourcePath,
-        env: {
+        cwd: bootstrapWorkingDirectory,
+        env: sanitizeFrierenShellEnv({
+          env: {
           ...process.env,
           AIRI_FRIEREN_SIDECAR_RUNTIME_DIR: runtimePaths.rootPath,
           ENV_FILE: bundledConfig.resolvedEnvFile,
           PYTHON_BIN: process.env.PYTHON_BIN ?? '3.10',
           VENV_DIR: runtimePaths.venvPath,
-        },
+          },
+          runtimeRootPath: runtimePaths.rootPath,
+          shellWorkingDirectory: bootstrapWorkingDirectory,
+        }),
         label: 'bootstrap',
         scriptPath: bootstrapScriptPath,
         timeoutMsec: frierenSpeechBootstrapTimeoutMsec,
@@ -832,6 +902,10 @@ async function acquireManagedFrierenSpeechStartupLock(baseUrl: string) {
   while (Date.now() < deadline) {
     try {
       await mkdir(lockPath)
+      await writeFile(getManagedFrierenSpeechStartupLockOwnerPath(), JSON.stringify({
+        createdAt: new Date().toISOString(),
+        pid: process.pid,
+      }, null, 2), 'utf8')
       return true
     }
     catch (error) {
@@ -842,6 +916,19 @@ async function acquireManagedFrierenSpeechStartupLock(baseUrl: string) {
 
       if (await isManagedFrierenSpeechSidecarReachable(baseUrl)) {
         return false
+      }
+
+      try {
+        const lockStat = await stat(lockPath)
+        const lockAgeMsec = Date.now() - lockStat.mtimeMs
+        if (lockAgeMsec >= frierenSpeechSidecarStartupLockTimeoutMsec) {
+          await rm(lockPath, { force: true, recursive: true })
+          continue
+        }
+      }
+      catch {
+        // The lock may have been removed concurrently. Retry acquiring it.
+        continue
       }
 
       await delay(200)
@@ -950,9 +1037,15 @@ async function ensureManagedFrierenSpeechSidecar(payload: FrierenSpeechSidecarVa
     await stopManagedFrierenSpeechSidecar()
 
     let startupFailure: string | null = null
+    const shellWorkingDirectory = resolveFrierenShellWorkingDirectory({
+      launchMode: launchConfig.launchMode,
+      resolvedBridgeDir: launchConfig.resolvedBridgeDir,
+      runtimeRootPath: launchConfig.runtimeRootPath,
+    })
     const child = spawn('bash', [launchConfig.runScriptPath], {
-      cwd: launchConfig.resolvedBridgeDir,
-      env: {
+      cwd: shellWorkingDirectory,
+      env: sanitizeFrierenShellEnv({
+        env: {
         ...process.env,
         HOST: parsedBaseUrl.hostname,
         KOKORO_SYNTH_MODE: 'embedded',
@@ -964,7 +1057,10 @@ async function ensureManagedFrierenSpeechSidecar(payload: FrierenSpeechSidecarVa
               VENV_DIR: launchConfig.venvPath ?? resolve(launchConfig.runtimeRootPath, 'venv'),
             }
           : {}),
-      },
+        },
+        runtimeRootPath: launchConfig.runtimeRootPath,
+        shellWorkingDirectory,
+      }),
       stdio: ['ignore', 'pipe', 'pipe'],
     })
 
@@ -1066,14 +1162,14 @@ async function getBundledFrierenSpeechSidecarStatus(payload: FrierenSpeechSideca
   if (hasBundledFields) {
     try {
       const bundledConfig = await resolveManagedFrierenSpeechBundledConfig(runtimePaths.rootPath, payload)
-      const dualLlmRuntimeConfig = await readFrierenSpeechDualLlmRuntimeConfig(bundledConfig.resolvedEnvFile)
-      const dualLlmMessage = dualLlmRuntimeConfig.dualLlmApiKeyConfigured
+      const runtimeEnvConfig = await readFrierenSpeechRuntimeEnvConfig(bundledConfig.resolvedEnvFile)
+      const dualLlmMessage = runtimeEnvConfig.dualLlmApiKeyConfigured
         ? ' Dual LLM runtime config is present.'
         : ' Dual LLM runtime config is missing `DUAL_LLM_API_KEY`, so text response will fail until AIRI rewrites and restarts the managed sidecar.'
 
       if (await isManagedFrierenSpeechSidecarReachable(baseUrl)) {
         return createFrierenSpeechStatusResult({
-          ...dualLlmRuntimeConfig,
+          ...runtimeEnvConfig,
           ...runtimeBase,
           message: `AIRI-managed Frieren sidecar is running at ${baseUrl}.${dualLlmMessage}`,
           resolvedEnvFile: bundledConfig.resolvedEnvFile,
@@ -1085,7 +1181,7 @@ async function getBundledFrierenSpeechSidecarStatus(payload: FrierenSpeechSideca
         && await isReadableFile(resolve(runtimePaths.venvPath, 'bin/python'))
 
       return createFrierenSpeechStatusResult({
-        ...dualLlmRuntimeConfig,
+        ...runtimeEnvConfig,
         ...runtimeBase,
         message: runtimeReady
           ? `Bundled Frieren sidecar runtime is ready. AIRI will start it when validation or playback needs it.${dualLlmMessage}`
@@ -1149,14 +1245,14 @@ async function getExternalFrierenSpeechSidecarStatus(payload: FrierenSpeechSidec
   if (resolvedEnvFile) {
     await assertReadableFile(resolvedEnvFile, 'Frieren sidecar env file')
   }
-  const dualLlmRuntimeConfig = await readFrierenSpeechDualLlmRuntimeConfig(resolvedEnvFile)
-  const dualLlmMessage = dualLlmRuntimeConfig.dualLlmApiKeyConfigured
+  const runtimeEnvConfig = await readFrierenSpeechRuntimeEnvConfig(resolvedEnvFile)
+  const dualLlmMessage = runtimeEnvConfig.dualLlmApiKeyConfigured
     ? ' Dual LLM runtime config is present.'
     : (resolvedEnvFile ? ' Dual LLM runtime config is missing `DUAL_LLM_API_KEY` in the configured env file.' : '')
 
   if (await isManagedFrierenSpeechSidecarReachable(baseUrl)) {
     return createFrierenSpeechStatusResult({
-      ...dualLlmRuntimeConfig,
+      ...runtimeEnvConfig,
       launchMode: 'external',
       message: `External Frieren sidecar is running at ${baseUrl}.${dualLlmMessage}`,
       resolvedBridgeDir,
@@ -1167,7 +1263,7 @@ async function getExternalFrierenSpeechSidecarStatus(payload: FrierenSpeechSidec
   }
 
   return createFrierenSpeechStatusResult({
-    ...dualLlmRuntimeConfig,
+    ...runtimeEnvConfig,
     launchMode: 'external',
     message: `External Frieren checkout is configured. AIRI will start it when validation or playback needs it.${dualLlmMessage}`,
     resolvedBridgeDir,
@@ -1295,6 +1391,7 @@ async function importFrierenSpeechSidecarConfig(payload: FrierenSpeechSidecarVal
     const dualLlmApiKey = readTrimmedPath(parsed.get('DUAL_LLM_API_KEY'))
     const dualLlmBaseUrl = readTrimmedPath(parsed.get('DUAL_LLM_BASE_URL'))
     const dualLlmModel = readTrimmedPath(parsed.get('DUAL_LLM_MODEL'))
+    const rvcDevice = readTrimmedPath(parsed.get('FORCE_RVC_DEVICE'))
     const kokoroProjectDir = readTrimmedPath(parsed.get('KOKORO_PROJECT_DIR'))
     const rvcModelPath = readTrimmedPath(parsed.get('RVC_MODEL_PATH'))
     const rvcIndexPath = readTrimmedPath(parsed.get('RVC_INDEX_PATH'))
@@ -1307,6 +1404,7 @@ async function importFrierenSpeechSidecarConfig(payload: FrierenSpeechSidecarVal
         ...(dualLlmApiKey ? { dualLlmApiKey } : {}),
         ...(dualLlmBaseUrl ? { dualLlmBaseUrl } : {}),
         ...(dualLlmModel ? { dualLlmModel } : {}),
+        ...(rvcDevice ? { rvcDevice } : {}),
         ...(kokoroProjectDir ? { kokoroProjectDir } : {}),
         ...(rvcModelPath ? { rvcModelPath } : {}),
         ...(rvcIndexPath ? { rvcIndexPath } : {}),
@@ -1319,6 +1417,7 @@ async function importFrierenSpeechSidecarConfig(payload: FrierenSpeechSidecarVal
       ...(dualLlmApiKey ? { dualLlmApiKey } : {}),
       ...(dualLlmBaseUrl ? { dualLlmBaseUrl } : {}),
       ...(dualLlmModel ? { dualLlmModel } : {}),
+      ...(rvcDevice ? { rvcDevice } : {}),
       resolvedEnvFile,
       kokoroProjectDir,
       rvcIndexPath,
@@ -1406,6 +1505,110 @@ async function testFrierenSpeechDualLlm(payload: FrierenSpeechSidecarValidationP
   }
 }
 
+function readFrierenTimingNumber(headers: Headers, name: string) {
+  const rawValue = headers.get(name)
+  if (!rawValue) {
+    return undefined
+  }
+
+  const parsed = Number(rawValue)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function readFrierenProfilingTimings(headers: Headers): FrierenSpeechProfilingTimings {
+  const dualCacheHit = headers.get('X-Frieren-Dual-Cache-Hit')
+
+  return {
+    totalMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Total-Ms'),
+    dualTextMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Dual-Text-Ms'),
+    llmMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Llm-Ms'),
+    kokoroMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Kokoro-Ms'),
+    rvcMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Rvc-Ms'),
+    encodeMs: readFrierenTimingNumber(headers, 'X-Frieren-Timing-Encode-Ms'),
+    ...(dualCacheHit === null ? {} : { dualCacheHit: dualCacheHit === '1' }),
+  }
+}
+
+async function fetchFrierenProfilingSample(params: {
+  baseUrl: string
+  body: Record<string, unknown>
+  pathname: string
+  timeoutMsec: number
+}): Promise<FrierenSpeechProfilingSample> {
+  const abortController = new AbortController()
+  const abortTimeout = setTimeout(() => {
+    abortController.abort(new Error(`Timed out while profiling ${params.pathname}.`))
+  }, params.timeoutMsec)
+  const startedAt = Date.now()
+
+  try {
+    const response = await fetch(new URL(params.pathname, params.baseUrl), {
+      body: JSON.stringify(params.body),
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      method: 'POST',
+      signal: abortController.signal,
+    })
+
+    const contentType = response.headers.get('content-type') ?? ''
+    const responsePreview = contentType.includes('application/json')
+      ? (await response.text()).trim().slice(0, 1000)
+      : undefined
+
+    return {
+      durationMs: Date.now() - startedAt,
+      ...(responsePreview ? { responsePreview } : {}),
+      statusCode: response.status,
+      timings: readFrierenProfilingTimings(response.headers),
+    }
+  }
+  finally {
+    clearTimeout(abortTimeout)
+  }
+}
+
+async function profileFrierenSpeech(payload: FrierenSpeechSidecarValidationPayload): Promise<FrierenSpeechProfilingResult> {
+  try {
+    await stopManagedFrierenSpeechSidecar()
+    const validationResult = await ensureManagedFrierenSpeechSidecar(payload)
+    const profilingResponseFormat = payload.profilingResponseFormat === 'wav' ? 'wav' : 'mp3'
+    const text = await fetchFrierenProfilingSample({
+      baseUrl: validationResult.validatedBaseUrl,
+      body: {
+        input: '請只回答 測試成功',
+      },
+      pathname: 'dual/text',
+      timeoutMsec: frierenSpeechProfilingTimeoutMsec,
+    })
+    const speech = await fetchFrierenProfilingSample({
+      baseUrl: validationResult.validatedBaseUrl,
+      body: {
+        input: '這是一個語音速度測試。',
+        model: 'frieren-rvc',
+        response_format: profilingResponseFormat,
+        speed: 1.0,
+        voice: 'frieren',
+      },
+      pathname: 'audio/speech',
+      timeoutMsec: frierenSpeechProfilingTimeoutMsec,
+    })
+
+    return {
+      message: 'Frieren speech profiling completed.',
+      speech,
+      success: true,
+      text,
+    }
+  }
+  catch (error) {
+    return {
+      message: errorMessageFrom(error) ?? 'Frieren speech profiling failed.',
+      success: false,
+    }
+  }
+}
+
 export function createFrierenSpeechService(params: { context: ReturnType<typeof createContext>['context'], window: BrowserWindow }) {
   void params.window
 
@@ -1432,6 +1635,10 @@ export function createFrierenSpeechService(params: { context: ReturnType<typeof 
   defineInvokeHandler(params.context, electronTestFrierenSpeechDualLlm, async (payload) => {
     return testFrierenSpeechDualLlm(payload)
   })
+
+  defineInvokeHandler(params.context, electronProfileFrierenSpeechOnDesktop, async (payload) => {
+    return profileFrierenSpeech(payload)
+  })
 }
 
 export const __frierenSpeechTestUtils = {
@@ -1445,6 +1652,7 @@ export const __frierenSpeechTestUtils = {
   resolveBundledFrierenSpeechSourcePath,
   restartFrierenSpeechSidecar,
   stopManagedFrierenSpeechSidecar,
+  profileFrierenSpeech,
   testFrierenSpeechDualLlm,
   validateFrierenSpeechSidecar,
 }

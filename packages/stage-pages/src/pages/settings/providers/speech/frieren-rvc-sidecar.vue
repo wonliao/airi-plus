@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { FrierenSpeechDualLlmTestResult, FrierenSpeechSidecarStatusResult } from '@proj-airi/stage-shared'
+import type { FrierenSpeechDualLlmTestResult, FrierenSpeechProfilingResult, FrierenSpeechSidecarStatusResult } from '@proj-airi/stage-shared'
 import type { RemovableRef } from '@vueuse/core'
 import type { SpeechProvider } from '@xsai-ext/providers/utils'
 
@@ -8,6 +8,7 @@ import {
   getFrierenSpeechSidecarStatusOnDesktop,
   importFrierenSpeechSidecarConfigOnDesktop,
   installFrierenSpeechSidecarOnDesktop,
+  profileFrierenSpeechOnDesktop,
   restartFrierenSpeechSidecarOnDesktop,
   testFrierenSpeechDualLlmOnDesktop,
 } from '@proj-airi/stage-shared'
@@ -32,6 +33,7 @@ const defaultVoice = 'frieren'
 const defaultBaseUrl = 'http://127.0.0.1:8010/v1/'
 const defaultDualLlmBaseUrl = 'https://api.openai.com/v1/'
 const defaultDualLlmModel = 'gpt-4.1-mini'
+const defaultProfilingResponseFormat = 'mp3'
 const defaultVoiceSettings = {
   speed: 1.0,
 }
@@ -104,6 +106,28 @@ const dualLlmModel = computed({
   },
 })
 
+const rvcDevice = computed({
+  get: () => providers.value[providerId]?.rvcDevice as string | undefined || '',
+  set: (value) => {
+    if (!providers.value[providerId]) {
+      providers.value[providerId] = {}
+    }
+
+    providers.value[providerId].rvcDevice = value
+  },
+})
+
+const profilingResponseFormat = computed({
+  get: () => providers.value[providerId]?.profilingResponseFormat as string | undefined || defaultProfilingResponseFormat,
+  set: (value) => {
+    if (!providers.value[providerId]) {
+      providers.value[providerId] = {}
+    }
+
+    providers.value[providerId].profilingResponseFormat = value
+  },
+})
+
 const kokoroProjectDir = computed({
   get: () => providers.value[providerId]?.kokoroProjectDir as string | undefined || '',
   set: (value) => {
@@ -154,9 +178,26 @@ const speed = computed<number>({
 const voicesLoading = ref(false)
 const sidecarStatus = ref<FrierenSpeechSidecarStatusResult>()
 const sidecarStatusLoading = ref(false)
-const sidecarActionLoading = ref<'import' | 'install' | 'restart' | 'test-dual-llm' | null>(null)
+const sidecarActionLoading = ref<'import' | 'install' | 'restart' | 'test-dual-llm' | 'profile' | null>(null)
 const configImportMessage = ref('')
 const dualLlmTestResult = ref<FrierenSpeechDualLlmTestResult>()
+const speechProfilingResult = ref<FrierenSpeechProfilingResult>()
+const sidecarActionMessage = computed(() => {
+  switch (sidecarActionLoading.value) {
+    case 'install':
+      return t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.install')
+    case 'import':
+      return t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.import')
+    case 'restart':
+      return t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.restart')
+    case 'test-dual-llm':
+      return t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.test-dual-llm')
+    case 'profile':
+      return t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.profile')
+    default:
+      return ''
+  }
+})
 
 const {
   router,
@@ -253,6 +294,13 @@ const sidecarRuntimeDetails = computed(() => {
         value: status.dualLlmModel,
       })
     }
+
+    if (status.rvcDevice) {
+      details.push({
+        label: t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.details.rvc-device'),
+        value: status.rvcDevice,
+      })
+    }
   }
 
   if (status.launchMode === 'external') {
@@ -315,6 +363,7 @@ function getSidecarPayload() {
   const trimmedDualLlmModel = dualLlmModel.value.trim()
   const trimmedEnvFile = envFile.value.trim()
   const trimmedKokoroProjectDir = kokoroProjectDir.value.trim()
+  const trimmedRvcDevice = rvcDevice.value.trim()
   const trimmedRvcModelPath = rvcModelPath.value.trim()
   const trimmedRvcIndexPath = rvcIndexPath.value.trim()
 
@@ -325,9 +374,18 @@ function getSidecarPayload() {
     ...(trimmedDualLlmBaseUrl ? { dualLlmBaseUrl: trimmedDualLlmBaseUrl } : {}),
     ...(trimmedDualLlmModel ? { dualLlmModel: trimmedDualLlmModel } : {}),
     ...(trimmedEnvFile ? { envFile: trimmedEnvFile } : {}),
+    profilingResponseFormat: profilingResponseFormat.value === 'wav' ? 'wav' : 'mp3',
     ...(trimmedKokoroProjectDir ? { kokoroProjectDir: trimmedKokoroProjectDir } : {}),
+    ...(trimmedRvcDevice ? { rvcDevice: trimmedRvcDevice } : {}),
     ...(trimmedRvcModelPath ? { rvcModelPath: trimmedRvcModelPath } : {}),
     ...(trimmedRvcIndexPath ? { rvcIndexPath: trimmedRvcIndexPath } : {}),
+  }
+}
+
+function getInstallOrRepairPayload() {
+  return {
+    ...getSidecarPayload(),
+    forceReinstall: true,
   }
 }
 
@@ -376,7 +434,7 @@ async function handleInstallOrRepair() {
   sidecarActionLoading.value = 'install'
 
   try {
-    const status = await installFrierenSpeechSidecarOnDesktop(getSidecarPayload())
+    const status = await installFrierenSpeechSidecarOnDesktop(getInstallOrRepairPayload())
     if (!status) {
       throw new Error('Frieren RVC sidecar is only available in AIRI Desktop.')
     }
@@ -408,6 +466,7 @@ async function handleImportFromEnvFile() {
     dualLlmBaseUrl.value = importedConfig.dualLlmBaseUrl || defaultDualLlmBaseUrl
     dualLlmModel.value = importedConfig.dualLlmModel || defaultDualLlmModel
     kokoroProjectDir.value = importedConfig.kokoroProjectDir || ''
+    rvcDevice.value = importedConfig.rvcDevice || ''
     rvcModelPath.value = importedConfig.rvcModelPath || ''
     rvcIndexPath.value = importedConfig.rvcIndexPath || ''
   }
@@ -456,6 +515,32 @@ async function handleTestDualLlm() {
   }
 }
 
+function formatProfilingDuration(durationMs: number | undefined) {
+  if (typeof durationMs !== 'number' || !Number.isFinite(durationMs)) {
+    return 'n/a'
+  }
+
+  return `${durationMs.toFixed(1)} ms`
+}
+
+async function handleProfileSpeech() {
+  sidecarActionLoading.value = 'profile'
+  speechProfilingResult.value = undefined
+
+  try {
+    const result = await profileFrierenSpeechOnDesktop(getSidecarPayload())
+    if (!result) {
+      throw new Error('Frieren RVC sidecar is only available in AIRI Desktop.')
+    }
+
+    speechProfilingResult.value = result
+  }
+  finally {
+    sidecarActionLoading.value = null
+    await refreshSidecarStatus()
+  }
+}
+
 async function handleGenerateSpeech(input: string, voiceId: string, _useSSML: boolean) {
   const provider = await providersStore.getProviderInstance<SpeechProvider<string>>(providerId)
   if (!provider) {
@@ -492,6 +577,8 @@ onMounted(async () => {
   providerConfig.baseUrl = (providerConfig.baseUrl as string | undefined) || defaultBaseUrl
   providerConfig.dualLlmBaseUrl = (providerConfig.dualLlmBaseUrl as string | undefined) || defaultDualLlmBaseUrl
   providerConfig.dualLlmModel = (providerConfig.dualLlmModel as string | undefined) || defaultDualLlmModel
+  providerConfig.rvcDevice = (providerConfig.rvcDevice as string | undefined) || 'cpu'
+  providerConfig.profilingResponseFormat = (providerConfig.profilingResponseFormat as string | undefined) || defaultProfilingResponseFormat
   providerConfig.model = (providerConfig.model as string | undefined) || defaultModel
   providerConfig.voice = (providerConfig.voice as string | undefined) || defaultVoice
   const existingVoiceSettings = typeof providerConfig.voiceSettings === 'object' && providerConfig.voiceSettings != null
@@ -505,11 +592,11 @@ onMounted(async () => {
   await refreshSidecarStatus()
 })
 
-watch([bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile, kokoroProjectDir, rvcModelPath, rvcIndexPath, baseUrl], () => {
+watch([bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile, kokoroProjectDir, rvcDevice, rvcModelPath, rvcIndexPath, baseUrl], () => {
   debouncedRefreshSidecarStatus()
 })
 
-watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile, kokoroProjectDir, rvcModelPath, rvcIndexPath, baseUrl], async ([valid]) => {
+watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile, kokoroProjectDir, rvcDevice, rvcModelPath, rvcIndexPath, baseUrl], async ([valid]) => {
   if (!valid) {
     return
   }
@@ -553,6 +640,18 @@ watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile,
       </Alert>
 
       <Alert
+        v-if="sidecarActionMessage"
+        type="loading"
+      >
+        <template #title>
+          {{ t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.progress.title') }}
+        </template>
+        <template #content>
+          {{ sidecarActionMessage }}
+        </template>
+      </Alert>
+
+      <Alert
         v-if="dualLlmTestResult"
         :type="dualLlmTestResult.success ? 'success' : 'error'"
       >
@@ -578,6 +677,57 @@ watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile,
               :class="['rounded-lg bg-black/4 px-3 py-2 text-xs font-mono whitespace-pre-wrap break-all dark:bg-white/6']"
             >
               {{ dualLlmTestResult.responseText }}
+            </div>
+          </div>
+        </template>
+      </Alert>
+
+      <Alert
+        v-if="speechProfilingResult"
+        :type="speechProfilingResult.success ? 'info' : 'error'"
+      >
+        <template #title>
+          {{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.title') }}
+        </template>
+        <template #content>
+          <div :class="['flex flex-col gap-3']">
+            <p :class="['whitespace-pre-wrap break-all']">
+              {{ speechProfilingResult.message }}
+            </p>
+
+            <div
+              v-if="speechProfilingResult.text"
+              :class="['flex flex-col gap-2 rounded-lg bg-black/4 px-3 py-3 text-xs dark:bg-white/6']"
+            >
+              <span :class="['font-medium']">
+                {{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.text.title') }}
+              </span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.request') }}: {{ formatProfilingDuration(speechProfilingResult.text.durationMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.total') }}: {{ formatProfilingDuration(speechProfilingResult.text.timings.totalMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.llm') }}: {{ formatProfilingDuration(speechProfilingResult.text.timings.llmMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.cache-hit') }}: {{ speechProfilingResult.text.timings.dualCacheHit ? t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.presence.present') : t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.presence.missing') }}</span>
+              <span v-if="speechProfilingResult.text.statusCode">HTTP {{ speechProfilingResult.text.statusCode }}</span>
+              <span
+                v-if="speechProfilingResult.text.responsePreview"
+                :class="['font-mono whitespace-pre-wrap break-all']"
+              >
+                {{ speechProfilingResult.text.responsePreview }}
+              </span>
+            </div>
+
+            <div
+              v-if="speechProfilingResult.speech"
+              :class="['flex flex-col gap-2 rounded-lg bg-black/4 px-3 py-3 text-xs dark:bg-white/6']"
+            >
+              <span :class="['font-medium']">
+                {{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.speech.title') }}
+              </span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.request') }}: {{ formatProfilingDuration(speechProfilingResult.speech.durationMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.total') }}: {{ formatProfilingDuration(speechProfilingResult.speech.timings.totalMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.kokoro') }}: {{ formatProfilingDuration(speechProfilingResult.speech.timings.kokoroMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.rvc') }}: {{ formatProfilingDuration(speechProfilingResult.speech.timings.rvcMs) }}</span>
+              <span>{{ t('settings.pages.providers.provider.frieren-rvc-sidecar.profiling.labels.encode') }}: {{ formatProfilingDuration(speechProfilingResult.speech.timings.encodeMs) }}</span>
+              <span v-if="speechProfilingResult.speech.statusCode">HTTP {{ speechProfilingResult.speech.statusCode }}</span>
             </div>
           </div>
         </template>
@@ -661,6 +811,17 @@ watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile,
               </Button>
 
               <Button
+                v-if="resolvedLaunchMode === 'bundled'"
+                size="sm"
+                variant="secondary"
+                :loading="sidecarActionLoading === 'profile'"
+                :disabled="sidecarActionLoading !== null"
+                @click="handleProfileSpeech"
+              >
+                {{ t('settings.pages.providers.provider.frieren-rvc-sidecar.runtime.actions.profile') }}
+              </Button>
+
+              <Button
                 size="sm"
                 variant="secondary"
                 :loading="sidecarActionLoading === 'restart'"
@@ -711,6 +872,22 @@ watch([isValid, bridgeDir, dualLlmApiKey, dualLlmBaseUrl, dualLlmModel, envFile,
         :label="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.dual-llm-model.label')"
         :description="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.dual-llm-model.description')"
         :placeholder="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.dual-llm-model.placeholder')"
+      />
+
+      <FieldInput
+        v-if="resolvedLaunchMode === 'bundled'"
+        v-model="profilingResponseFormat"
+        :label="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.profiling-response-format.label')"
+        :description="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.profiling-response-format.description')"
+        :placeholder="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.profiling-response-format.placeholder')"
+      />
+
+      <FieldInput
+        v-if="resolvedLaunchMode === 'bundled'"
+        v-model="rvcDevice"
+        :label="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.rvc-device.label')"
+        :description="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.rvc-device.description')"
+        :placeholder="t('settings.pages.providers.provider.frieren-rvc-sidecar.fields.field.rvc-device.placeholder')"
       />
     </template>
 

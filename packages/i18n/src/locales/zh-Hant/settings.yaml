@@ -857,6 +857,14 @@ pages:
               label: Dual LLM Model
               description: 僅限 bundled 模式。這個對話模型名稱會被寫入受管的 `sidecar.env`，對應 `DUAL_LLM_MODEL`。
               placeholder: gpt-4.1-mini
+            profiling-response-format:
+              label: Profiling 回應格式
+              description: 僅限 bundled 模式。改成 `wav` 可以直接量出目前 MP3 編碼額外增加了多少時間。
+              placeholder: mp3 或 wav
+            rvc-device:
+              label: RVC Device Override
+              description: 僅限 bundled 模式。建議固定使用 `cpu`。可填 `cpu` 或 `cuda:0`；目前這個 AIRI managed runtime 上的 `mps` 並不穩定。
+              placeholder: 建議填 cpu，或使用 cuda:0
             kokoro-project-dir:
               label: Kokoro 專案目錄
               description: 僅限 bundled 模式。AIRI 會使用這份本機 `Kokoro-FastAPI` checkout 來做 embedded synthesis，並把路徑寫入受管的 `sidecar.env`。
@@ -875,6 +883,13 @@ pages:
               placeholder: /path/to/frieren.env，或 AIRI runtime 底下的相對路徑
         runtime:
           loading: 正在檢查 Frieren runtime 狀態...
+          progress:
+            title: Runtime 作業進行中
+            install: 正在安裝或修復 AIRI 受管的 Frieren runtime。第一次執行可能需要幾分鐘。
+            import: 正在從 env 檔匯入設定。
+            restart: 正在重新啟動 Frieren sidecar。
+            test-dual-llm: 正在測試 Dual LLM 連線。
+            profile: 正在分析 Frieren 語音耗時。
           presence:
             present: 已存在
             missing: 缺少
@@ -892,6 +907,7 @@ pages:
             refresh: 重新整理狀態
             import-env: 從 env 檔匯入
             install-or-repair: 安裝或修復 runtime
+            profile: 分析語音耗時
             test-dual-llm: 測試 Dual LLM
             restart: 重新啟動 sidecar
           details:
@@ -900,6 +916,7 @@ pages:
             dual-llm-api-key: Dual LLM API Key
             dual-llm-base-url: Dual LLM Base URL
             dual-llm-model: Dual LLM Model
+            rvc-device: RVC Device Override
             bridge-dir: Bridge 目錄
             runtime-root: Runtime 根目錄
             source-path: 內建 source 路徑
@@ -911,6 +928,20 @@ pages:
         dual-llm-test:
           title: Dual LLM 測試結果
           duration: '耗時：{durationMs} ms'
+        profiling:
+          title: 語音分段分析
+          text:
+            title: 文字回應耗時
+          speech:
+            title: 語音回應耗時
+          labels:
+            request: 端到端請求
+            total: Sidecar 總耗時
+            llm: LLM
+            kokoro: Kokoro
+            rvc: RVC
+            encode: 編碼
+            cache-hit: Dual text 快取
         playground:
           default-text: 您好，這是 Frieren RVC sidecar 的語音測試。
       speech-noop:

@@ -914,6 +914,14 @@ pages:
               label: Dual LLM Model
               description: Bundled mode only. Chat model written into the managed `sidecar.env` as `DUAL_LLM_MODEL`.
               placeholder: gpt-4.1-mini
+            profiling-response-format:
+              label: Profiling Response Format
+              description: Bundled mode only. Use `wav` to measure how much time MP3 encoding is currently adding during speech profiling.
+              placeholder: mp3 or wav
+            rvc-device:
+              label: RVC Device Override
+              description: Bundled mode only. `cpu` is the recommended default. Use `cpu` or `cuda:0`; `mps` is currently unstable in this AIRI-managed runtime.
+              placeholder: "Recommended: cpu, or use cuda:0"
             kokoro-project-dir:
               label: Kokoro Project Directory
               description: Bundled mode only. AIRI uses this local `Kokoro-FastAPI` checkout to run embedded synthesis and writes it into the managed `sidecar.env`.
@@ -932,6 +940,13 @@ pages:
               placeholder: /path/to/frieren.env or relative to the AIRI runtime
         runtime:
           loading: Inspecting Frieren runtime status...
+          progress:
+            title: Runtime task in progress
+            install: Installing or repairing the AIRI-managed Frieren runtime. The first run can take a few minutes.
+            import: Importing configuration from the env file.
+            restart: Restarting the Frieren sidecar.
+            test-dual-llm: Testing the Dual LLM connection.
+            profile: Profiling Frieren speech timings.
           presence:
             present: Present
             missing: Missing
@@ -949,6 +964,7 @@ pages:
             refresh: Refresh status
             import-env: Import from env file
             install-or-repair: Install or repair runtime
+            profile: Profile speech timings
             test-dual-llm: Test Dual LLM
             restart: Restart sidecar
           details:
@@ -957,6 +973,7 @@ pages:
             dual-llm-api-key: Dual LLM API Key
             dual-llm-base-url: Dual LLM Base URL
             dual-llm-model: Dual LLM Model
+            rvc-device: RVC Device Override
             bridge-dir: Bridge directory
             runtime-root: Runtime root
             source-path: Bundled source path
@@ -968,6 +985,20 @@ pages:
         dual-llm-test:
           title: Dual LLM test result
           duration: 'Duration: {durationMs} ms'
+        profiling:
+          title: Speech profiling
+          text:
+            title: Dual text timing
+          speech:
+            title: Speech timing
+          labels:
+            request: End-to-end request
+            total: Sidecar total
+            llm: LLM
+            kokoro: Kokoro
+            rvc: RVC
+            encode: Encode
+            cache-hit: Dual text cache
         playground:
           default-text: Hello. This is a test of the Frieren RVC sidecar voice.
       speech-noop:
