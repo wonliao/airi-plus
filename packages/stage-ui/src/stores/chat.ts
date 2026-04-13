@@ -28,7 +28,9 @@ import { useLLM } from './llm'
 import { useConsciousnessStore } from './modules/consciousness'
 import { useLongTermMemoryStore } from './modules/memory-long-term'
 import { useShortTermMemoryStore } from './modules/memory-short-term'
+import { useSpeechStore } from './modules/speech'
 import { useProvidersStore } from './providers'
+import { useSpeechRuntimeStore } from './speech-runtime'
 
 interface SendOptions {
   model: string
@@ -83,6 +85,8 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const { streamingMessage } = storeToRefs(chatStream)
   const longTermMemoryStore = useLongTermMemoryStore()
   const shortTermMemoryStore = useShortTermMemoryStore()
+  const speechStore = useSpeechStore()
+  const speechRuntimeStore = useSpeechRuntimeStore()
 
   const sending = ref(false)
   const pendingQueuedSends = ref<QueuedSend[]>([])
@@ -168,10 +172,18 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     sending.value = true
 
     const isForegroundSession = () => sessionId === activeSessionId.value
+    const shouldSynchronizeAssistantTextWithSpeech = () =>
+      isForegroundSession() && speechStore.activeSpeechProvider === 'frieren-rvc-sidecar'
 
     const buildingMessage: StreamingAssistantMessage = { role: 'assistant', content: '', slices: [], tool_results: [], createdAt: Date.now(), id: nanoid() }
+    const textRevealBarrier = shouldSynchronizeAssistantTextWithSpeech()
+      ? speechRuntimeStore.createTextRevealBarrier()
+      : null
 
     const updateUI = () => {
+      if (textRevealBarrier)
+        return
+
       if (isForegroundSession()) {
         streamingMessage.value = JSON.parse(JSON.stringify(buildingMessage))
       }
@@ -508,12 +520,17 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
       await parser.end()
 
+      await hooks.emitStreamEndHooks(streamingMessageContext)
+      await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
+
+      if (textRevealBarrier) {
+        await speechRuntimeStore.waitForTextRevealBarrier(textRevealBarrier.token)
+        updateUI()
+      }
+
       if (!isStaleGeneration() && buildingMessage.slices.length > 0) {
         chatSession.appendSessionMessage(sessionId, toRaw(buildingMessage))
       }
-
-      await hooks.emitStreamEndHooks(streamingMessageContext)
-      await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
 
       await hooks.emitAfterSendHooks(sendingMessage, streamingMessageContext)
       await hooks.emitAssistantMessageHooks({ ...buildingMessage }, fullText, streamingMessageContext)
