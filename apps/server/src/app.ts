@@ -11,6 +11,7 @@ import type { ChatService } from './services/chats'
 import type { ConfigKVService } from './services/config-kv'
 import type { FluxService } from './services/flux'
 import type { FluxTransactionService } from './services/flux-transaction'
+import type { OpenAISubscriptionAccountService } from './services/openai-subscription'
 import type { ProviderService } from './services/providers'
 import type { StripeService } from './services/stripe'
 import type { HonoEnv } from './types/hono'
@@ -40,6 +41,7 @@ import { createCharacterRoutes } from './routes/characters'
 import { createChatWsHandlers } from './routes/chat-ws'
 import { createChatRoutes } from './routes/chats'
 import { createFluxRoutes } from './routes/flux'
+import { createOpenAISubscriptionRoutes } from './routes/openai-subscription'
 import { createV1CompletionsRoutes } from './routes/openai/v1'
 import { createProviderRoutes } from './routes/providers'
 import { createStripeRoutes } from './routes/stripe'
@@ -50,6 +52,7 @@ import { createChatService } from './services/chats'
 import { createConfigKVService } from './services/config-kv'
 import { createFluxService } from './services/flux'
 import { createFluxTransactionService } from './services/flux-transaction'
+import { createOpenAISubscriptionAccountService } from './services/openai-subscription'
 import { createProviderService } from './services/providers'
 import { createRequestLogService } from './services/request-log'
 import { createStripeService } from './services/stripe'
@@ -64,6 +67,7 @@ interface AppDeps {
   providerService: ProviderService
   fluxService: FluxService
   fluxTransactionService: FluxTransactionService
+  openAISubscriptionAccountService: OpenAISubscriptionAccountService
   stripeService: StripeService
   billingService: BillingService
   billingMq: MqService<BillingEvent>
@@ -183,6 +187,15 @@ export async function buildApp(deps: AppDeps) {
      * V1 routes for official provider.
      */
     .route('/api/v1/openai', createV1CompletionsRoutes(deps.fluxService, deps.billingService, deps.configKV, deps.billingMq, deps.otel?.genAi))
+
+    /**
+     * OpenAI subscription OAuth/account proxy routes.
+     */
+    .route('/api/v1/openai-subscription', createOpenAISubscriptionRoutes({
+      accountService: deps.openAISubscriptionAccountService,
+      env: deps.env,
+      redis: deps.redis,
+    }))
 
     /**
      * Flux routes.
@@ -337,6 +350,14 @@ export async function createApp() {
     build: ({ dependsOn }) => createFluxService(dependsOn.db, dependsOn.redis, dependsOn.configKV),
   })
 
+  const openAISubscriptionAccountService = injeca.provide('services:openAISubscriptionAccount', {
+    dependsOn: { db, env: parsedEnv },
+    build: ({ dependsOn }) => createOpenAISubscriptionAccountService(
+      dependsOn.db,
+      dependsOn.env.OPENAI_SUBSCRIPTION_TOKEN_ENCRYPTION_KEY,
+    ),
+  })
+
   const requestLogService = injeca.provide('services:requestLog', {
     dependsOn: { db },
     build: ({ dependsOn }) => createRequestLogService(dependsOn.db),
@@ -356,6 +377,7 @@ export async function createApp() {
     providerService,
     fluxService,
     fluxTransactionService,
+    openAISubscriptionAccountService,
     requestLogService,
     stripeService,
     billingService,
@@ -373,6 +395,7 @@ export async function createApp() {
     providerService: resolved.providerService,
     fluxService: resolved.fluxService,
     fluxTransactionService: resolved.fluxTransactionService,
+    openAISubscriptionAccountService: resolved.openAISubscriptionAccountService,
     stripeService: resolved.stripeService,
     billingService: resolved.billingService,
     billingMq: resolved.billingMq,

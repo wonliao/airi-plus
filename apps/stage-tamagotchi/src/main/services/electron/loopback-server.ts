@@ -9,6 +9,12 @@ export interface LoopbackCallbackResult {
   state: string
 }
 
+interface StartLoopbackServerOptions {
+  callbackPath?: string
+  host?: string
+  ports?: number[]
+}
+
 /**
  * Fixed ports for the loopback OIDC callback server.
  * The server relay page (`/api/auth/oidc/electron-callback`) forwards the
@@ -31,8 +37,21 @@ export function startLoopbackServer(): Promise<{
   port: number
   result: Promise<LoopbackCallbackResult>
   close: () => void
+}>
+export function startLoopbackServer(options: StartLoopbackServerOptions): Promise<{
+  port: number
+  result: Promise<LoopbackCallbackResult>
+  close: () => void
+}>
+export function startLoopbackServer(options: StartLoopbackServerOptions = {}): Promise<{
+  port: number
+  result: Promise<LoopbackCallbackResult>
+  close: () => void
 }> {
   return new Promise((resolveStart, rejectStart) => {
+    const callbackPath = options.callbackPath ?? '/callback'
+    const host = options.host ?? '127.0.0.1'
+    const ports = options.ports ?? LOOPBACK_PORTS
     let settled = false
     let resultResolve: (value: LoopbackCallbackResult) => void
     let resultReject: (reason: Error) => void
@@ -46,7 +65,7 @@ export function startLoopbackServer(): Promise<{
       if (settled)
         return
 
-      const url = new URL(req.url ?? '/', `http://127.0.0.1`)
+      const url = new URL(req.url ?? '/', `http://${host}`)
 
       // CORS: the relay page on the server origin sends a cross-origin fetch()
       // to the loopback. Allow all origins since this is a one-shot local server.
@@ -58,7 +77,7 @@ export function startLoopbackServer(): Promise<{
         return
       }
 
-      if (url.pathname !== '/callback') {
+      if (url.pathname !== callbackPath) {
         res.writeHead(404)
         res.end('Not found')
         return
@@ -107,11 +126,11 @@ export function startLoopbackServer(): Promise<{
 
     function tryListen(): void {
       if (portIndex >= LOOPBACK_PORTS.length) {
-        rejectStart(new Error(`All loopback ports (${LOOPBACK_PORTS.join(', ')}) are in use`))
+        rejectStart(new Error(`All loopback ports (${ports.join(', ')}) are in use`))
         return
       }
 
-      const port = LOOPBACK_PORTS[portIndex]
+      const port = ports[portIndex]
 
       server.once('error', (err: NodeJS.ErrnoException) => {
         if (err.code === 'EADDRINUSE') {
@@ -124,7 +143,7 @@ export function startLoopbackServer(): Promise<{
         }
       })
 
-      server.listen(port, '127.0.0.1', () => {
+      server.listen(port, host, () => {
         log.withFields({ port }).log('Loopback callback server started')
         resolveStart({
           port,

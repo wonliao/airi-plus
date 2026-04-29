@@ -13,6 +13,8 @@ import { useDiscordStore } from '../stores/modules/discord'
 import { useFactorioStore } from '../stores/modules/gaming-factorio'
 import { useMinecraftStore } from '../stores/modules/gaming-minecraft'
 import { useHearingStore } from '../stores/modules/hearing'
+import { useLongTermMemoryStore } from '../stores/modules/memory-long-term'
+import { useShortTermMemoryStore } from '../stores/modules/memory-short-term'
 import { useSpeechStore } from '../stores/modules/speech'
 import { useTwitterStore } from '../stores/modules/twitter'
 import { useOnboardingStore } from '../stores/onboarding'
@@ -28,6 +30,8 @@ export function useDataMaintenance() {
   const audioSettingsStore = useSettingsAudioDevice()
   const live2dStore = useLive2d()
   const hearingStore = useHearingStore()
+  const shortTermMemoryStore = useShortTermMemoryStore()
+  const longTermMemoryStore = useLongTermMemoryStore()
   const speechStore = useSpeechStore()
   const consciousnessStore = useConsciousnessStore()
   const twitterStore = useTwitterStore()
@@ -52,6 +56,8 @@ export function useDataMaintenance() {
     hearingStore.resetState()
     speechStore.resetState()
     consciousnessStore.resetState()
+    shortTermMemoryStore.resetState()
+    longTermMemoryStore.resetState()
     twitterStore.resetState()
     discordStore.resetState()
     factorioStore.resetState()

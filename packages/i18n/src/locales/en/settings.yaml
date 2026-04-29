@@ -237,6 +237,33 @@ pages:
   memory:
     description: Where memories got stored, and organized
     title: Memory
+    overview:
+      title: Memory Backends
+      description: Configure short-term and long-term memory separately so AIRI can keep recent context and stable knowledge distinct.
+      openSettings: Open settings
+    status:
+      configured: Configured
+      validated: Validated
+      needsAttention: Needs attention
+      notConfigured: Not configured
+      enabled: Enabled
+      disabled: Disabled
+      enabledValue: On
+      disabledValue: Off
+      configuredValue: Ready
+      incompleteValue: Incomplete
+      validatedValue: Passed
+      failedValue: Failed
+      pendingValue: Pending
+    validation:
+      idleTitle: Validation not run yet
+      successTitle: Validation passed
+      errorTitle: Validation failed
+      runCheck: Run check
+      configuredPending: Configuration is complete, but validation has not been run yet.
+      notConfigured: Complete the required fields before validation can pass.
+      configuredLabel: Configured
+      notConfiguredLabel: Not configured
   data:
     title: Data
     description: Manage stored AIRI data, exports, and resets
@@ -400,16 +427,30 @@ pages:
       description: Playing Minecraft!
       title: Minecraft
       enable: Enable Minecraft Integration
-      enable-description: Allow AIRI to interact with Minecraft game
-      server-address: Server Address
-      server-address-description: The IP address or hostname of the Minecraft server
-      server-address-placeholder: Enter server address (e.g., localhost or play.example.com)
-      server-port: Server Port
-      server-port-description: The port number of the Minecraft server (default 25565)
-      username: Username
-      username-description: Your username in the Minecraft server
-      username-placeholder: Enter your Minecraft username
+      enable-description: Include Minecraft self-knowledge in Stage chat turns and keep passive runtime visibility enabled.
       configured: Minecraft is properly configured!
+      read-only:
+        title: Read-only shell
+        description: Stage currently exposes Minecraft as a passive shell. Runtime status and traffic are visible here, but service configuration stays in the Minecraft service files.
+      setup:
+        title: Setup
+        description: You can find the instructions for setting up the bot in the following file
+      runtime:
+        title: Observed runtime
+        connection: Connection
+        latest-context: Latest bot context
+        waiting: Waiting for a fresh bot-originated context push.
+        unknown: Unknown
+      debug:
+        title: Minecraft traffic
+        empty: No Minecraft traffic observed yet.
+        source: 'Source: {source}'
+      status:
+        service-online: Service online
+        service-offline: Service offline
+        no-runtime-context: 'No bot context observed yet'
+        last-context-seconds: 'Last bot context: {seconds}s ago'
+        last-context-stale: 'Last bot context: Stale'
     hearing:
       description: Configure how speech recognition works
       title: Hearing
@@ -428,9 +469,136 @@ pages:
     memory-long-term:
       description: Long-term memory specific settings and management
       title: Long-Term Memory
+      sections:
+        configuration:
+          title: llm-wiki configuration
+          description: AIRI automatically manages the default llm-wiki long-term knowledge workspace, so no path setup is needed.
+      fields:
+        enabled:
+          label: Enable long-term memory
+          description: Allow AIRI to keep a curated long-term knowledge workspace backed by llm-wiki.
+        workspacePath:
+          label: Workspace path
+          description: Root folder that contains the llm-wiki workspace. In AIRI Electron you can enter llm-wiki, a path relative to app data, or an absolute path.
+          placeholder: llm-wiki, ./knowledge/wiki, or /path/to/wiki-workspace
+        indexPath:
+          label: Index path
+          description: Entry file AIRI should treat as the wiki index.
+          placeholder: index.md
+        overviewPath:
+          label: Overview path
+          description: Overview page used as the primary summary entrypoint.
+          placeholder: wiki/overview.md
+        queryMode:
+          label: Query mode
+          description: Choose how AIRI should read from llm-wiki during first-release integration.
+          placeholder: Select a query mode
+        allowPromotion:
+          label: Allow promotion
+          description: Permit future runtime integrations to promote qualified memories into long-term knowledge.
+        manualReviewRequired:
+          label: Manual review required
+          description: Require manual review before non-trivial long-term knowledge updates are accepted.
+        personaReviewRequired:
+          label: Persona review required
+          description: Keep persona-related changes behind an explicit review gate.
+        notes:
+          label: Integration notes
+          description: Optional notes for future runtime wiring or workspace conventions.
+          placeholder: Describe any workspace conventions, digest commands, or review rules here.
+      notes:
+        title: First-release scope
+        content: This page now supports desktop llm-wiki query recall and basic validation. On AIRI Electron, the app automatically initializes and manages the default llm-wiki workspace under the app data directory, so no path setup is needed. Full ingest and promotion automation can be wired later.
+      debug:
+        lastRecall: Last llm-wiki recall
+        latestSources: Latest sources
     memory-short-term:
       description: Short-term memory specific settings and management
       title: Short-Term Memory
+      sections:
+        configuration:
+          title: Short-term memory configuration
+          description: Configure AIRI-managed local Mem0 sidecar settings and memory scope.
+        remote:
+          title: Local Mem0 sidecar
+          description: AIRI starts and manages a local Mem0 sidecar on this Mac, then talks to it over HTTP.
+      fields:
+        enabled:
+          label: Enable short-term memory
+          description: Allow AIRI to capture and recall short-term memory through the AIRI-managed local Mem0 sidecar.
+        openAIApiKey:
+          label: OpenAI API key
+          description: Required for the AIRI-managed local Mem0 sidecar. The sidecar uses OpenAI for memory extraction and embeddings.
+          placeholder: Enter your OpenAI API key
+        managedBaseUrl:
+          label: Managed local base URL
+          description: AIRI chooses and manages this local Mem0 sidecar endpoint automatically.
+        userId:
+          label: User ID
+          description: Primary memory scope identifier used in Mem0 requests.
+          placeholder: your-user-id
+        agentId:
+          label: Agent ID
+          description: Optional Mem0 agent scope for shared memory across multiple runs of the same agent.
+          placeholder: airi-agent
+        runId:
+          label: Run ID
+          description: Optional Mem0 run or session scope when you want memories isolated per conversation or workflow.
+          placeholder: chat-session-001
+        appId:
+          label: App ID
+          description: Optional Mem0 app scope when the same user may interact with AIRI from different surfaces.
+          placeholder: airi-desktop
+        autoRecall:
+          label: Auto recall
+          description: Automatically query the AIRI-managed local Mem0 sidecar for relevant memories before AIRI answers.
+        autoCapture:
+          label: Auto capture
+          description: Automatically send conversation turns to the AIRI-managed local Mem0 sidecar for memory extraction.
+        topK:
+          label: Top K
+          description: Maximum number of recalled memory items for a single lookup.
+        searchThreshold:
+          label: Search threshold
+          description: Minimum similarity threshold used by short-term memory retrieval.
+      notes:
+        title: AIRI-managed sidecar
+        content: AIRI uses short-term memory through its own local Mem0 sidecar. The sidecar is started and managed by AIRI, while the app still talks to it through HTTP.
+      captureTips:
+        title: How to make memory stick
+        content: Turn on auto capture, then tell AIRI short, explicit facts or preferences in chat. AIRI forwards the conversation turn to the local Mem0 sidecar, which decides what durable memory to keep.
+        example1: 'Example: Please remember that my favorite fruit is mango.'
+        example2: 'Example: Remember that my name is Ben.'
+        example3: 'Example: Remember that I prefer precise setup guides.'
+      actions:
+        clear:
+          title: Clear short-term memory
+          description: Remove every short-term memory item for the current scope from the AIRI-managed local Mem0 sidecar.
+          button: Clear short-term memory
+          clearing: Clearing...
+          success: Short-term memory cleared.
+      debug:
+        title: Runtime debug
+        description: Use this panel to confirm what AIRI recently sent to the local Mem0 sidecar for capture and what it queried during recall.
+        lastCapture: Last capture
+        lastRecall: Last recall
+        timestamp: Time
+        resultCount: Count
+        captureMode: Capture mode
+        candidates: Candidates
+        operations: Operations
+        eventLog: Event log
+        matchReasons: Match reasons
+        latestMemories: Latest memories
+        category: Category
+        conflictKey: Conflict key
+        matchedBy: Matched by
+        score: Score
+        copyJson: Copy debug JSON
+        copyJsonDone: Copied
+        copyJsonFailed: Copy failed
+        emptyPayload: No payload
+        emptyState: No runtime debug entry yet.
     messaging-discord:
       description: Chat & voice chat over Discord
       title: Discord
@@ -722,6 +890,117 @@ pages:
       deepgram-tts:
         description: deepgram.com
         title: Deepgram
+      frieren-rvc-sidecar:
+        description: AIRI-managed local sidecar for embedded Kokoro + RVC speech synthesis.
+        title: Frieren RVC Sidecar
+        callout:
+          title: Managed local sidecar
+          description: AIRI starts a managed local sidecar in embedded mode, keeps the bridge on localhost, and validates it before voice playback. Set a bridge directory to keep using an external checkout, or leave it blank to use AIRI's bundled source and let AIRI generate the managed env file from your Kokoro and RVC paths.
+        fields:
+          field:
+            bridge-dir:
+              label: Bridge Directory
+              description: Optional. Path to an external `frieren-rvc-bridge` checkout that contains `run-local.sh`. Leave blank to use AIRI's bundled sidecar source.
+              placeholder: Leave blank to use AIRI's bundled sidecar source
+            dual-llm-api-key:
+              label: Dual LLM API Key
+              description: Bundled mode only. API key passed into the managed `sidecar.env` as `DUAL_LLM_API_KEY` for text response generation.
+              placeholder: sk-...
+            dual-llm-base-url:
+              label: Dual LLM Base URL
+              description: Bundled mode only. OpenAI-compatible base URL written into the managed `sidecar.env` as `DUAL_LLM_BASE_URL`.
+              placeholder: https://api.openai.com/v1/
+            dual-llm-model:
+              label: Dual LLM Model
+              description: Bundled mode only. Chat model written into the managed `sidecar.env` as `DUAL_LLM_MODEL`.
+              placeholder: gpt-4.1-mini
+            profiling-response-format:
+              label: Profiling Response Format
+              description: Bundled mode only. Use `wav` to measure how much time MP3 encoding is currently adding during speech profiling.
+              placeholder: mp3 or wav
+            rvc-device:
+              label: RVC Device Override
+              description: Bundled mode only. `cpu` is the recommended default. Use `cpu` or `cuda:0`; `mps` is currently unstable in this AIRI-managed runtime.
+              placeholder: 'Recommended: cpu, or use cuda:0'
+            kokoro-project-dir:
+              label: Kokoro Project Directory
+              description: Bundled mode only. AIRI uses this local `Kokoro-FastAPI` checkout to run embedded synthesis and writes it into the managed `sidecar.env`.
+              placeholder: /path/to/Kokoro-FastAPI
+            rvc-model-path:
+              label: RVC Model Path
+              description: Bundled mode only. Path to the `.pth` voice model file used by the managed Frieren sidecar.
+              placeholder: /path/to/Frieren_e720_s6480.pth
+            rvc-index-path:
+              label: RVC Index Path
+              description: Bundled mode only. Path to the `.index` file paired with the selected RVC model.
+              placeholder: /path/to/added_IVF280_Flat_nprobe_1_Frieren_v2.index
+            env-file:
+              label: Env File
+              description: Optional advanced override. AIRI passes this file through as `ENV_FILE` when starting the sidecar. Bundled mode prefers the structured Kokoro and RVC path fields above, then falls back to `sidecar.env` inside the AIRI runtime directory.
+              placeholder: /path/to/frieren.env or relative to the AIRI runtime
+        runtime:
+          loading: Inspecting Frieren runtime status...
+          progress:
+            title: Runtime task in progress
+            install: Installing or repairing the AIRI-managed Frieren runtime. The first run can take a few minutes.
+            import: Importing configuration from the env file.
+            restart: Restarting the Frieren sidecar.
+            test-dual-llm: Testing the Dual LLM connection.
+            profile: Profiling Frieren speech timings.
+          presence:
+            present: Present
+            missing: Missing
+          states:
+            invalid: Runtime needs attention
+            missing-config: Kokoro or RVC paths required
+            missing-env-file: Env file required
+            needs-install: Install or repair required
+            ready: Ready to start
+            running: Running
+          modes:
+            bundled: AIRI bundled runtime
+            external: External checkout
+          actions:
+            refresh: Refresh status
+            import-env: Import from env file
+            install-or-repair: Install or repair runtime
+            profile: Profile speech timings
+            test-dual-llm: Test Dual LLM
+            restart: Restart sidecar
+          details:
+            mode: Launch mode
+            base-url: Base URL
+            dual-llm-api-key: Dual LLM API Key
+            dual-llm-base-url: Dual LLM Base URL
+            dual-llm-model: Dual LLM Model
+            rvc-device: RVC Device Override
+            bridge-dir: Bridge directory
+            runtime-root: Runtime root
+            source-path: Bundled source path
+            venv-path: Python virtualenv
+            env-file: Env file
+            bootstrap-log: Bootstrap log
+        import:
+          title: Imported configuration
+        dual-llm-test:
+          title: Dual LLM test result
+          duration: 'Duration: {durationMs} ms'
+        profiling:
+          title: Speech profiling
+          text:
+            title: Dual text timing
+          speech:
+            title: Speech timing
+          labels:
+            request: End-to-end request
+            total: Sidecar total
+            llm: LLM
+            kokoro: Kokoro
+            rvc: RVC
+            encode: Encode
+            cache-hit: Dual text cache
+        playground:
+          default-text: Hello. This is a test of the Frieren RVC sidecar voice.
       speech-noop:
         title: None
         description: No speech output.
@@ -836,6 +1115,36 @@ pages:
       openai:
         description: openai.com
         title: OpenAI
+      openai-subscription:
+        description: Experimental ChatGPT subscription integration for desktop AIRI.
+        title: OpenAI Subscription
+        sign-in:
+          title: Connect your ChatGPT subscription
+          description: Sign in with the ChatGPT account that has your Plus or Pro subscription.
+          experimentalDescription: Experimental desktop integration. OpenAI may change this flow or revoke compatibility without notice.
+          action: Sign in with ChatGPT
+        comparison:
+          title: About this provider
+          api:
+            title: OpenAI API
+            description: Stable developer API with API-key billing on the OpenAI platform.
+          subscription:
+            title: ChatGPT Subscription
+            description: Experimental desktop flow that uses your ChatGPT Plus or Pro access instead of API credits.
+        ready:
+          title: Subscription connected
+          description: AIRI can now try compatible Codex models through your ChatGPT subscription session.
+          tipTitle: Before you rely on it
+          tipDescription: This route is less stable than the OpenAI API and may stop working if OpenAI changes ChatGPT or Codex internals.
+          action: Use this provider
+          logout: Disconnect
+        unsupported:
+          title: Desktop only
+          description: This experimental provider is only available in AIRI Desktop because it relies on a local browser callback flow.
+        validation:
+          check-login:
+            title: Check ChatGPT subscription login
+            reason: Sign in with your ChatGPT subscription before using this provider.
       azure-openai:
         description: Azure OpenAI API
         title: Azure OpenAI
@@ -914,6 +1223,42 @@ pages:
         speech-description: Official text-to-speech provider by AIRI.
         transcription-title: Official Transcription Provider
         transcription-description: Official speech-to-text provider by AIRI.
+      openclaw:
+        title: OpenClaw
+        description: Native OpenClaw provider for agent-first chat workflows.
+        fields:
+          field:
+            agent-id:
+              label: Agent ID
+              description: The OpenClaw agent ID used as the default target for validation and chat routing.
+              placeholder: default
+            api-key:
+              description: Operator-level token used to access the OpenClaw HTTP API.
+            api-mode:
+              label: API Mode
+              description: Choose the OpenClaw compatibility endpoint used for chat requests.
+              options:
+                chat-completions: Chat Completions
+                responses: Responses (Preview)
+            base-url:
+              description: Base URL of the OpenClaw server. AIRI will normalize it to the /v1 HTTP API path.
+              placeholder: http://localhost:18789
+            session-key:
+              label: Manual Session Key
+              description: Explicit session key used when session strategy is set to manual.
+              placeholder: team-room-1
+            session-strategy:
+              label: Session Strategy
+              description: Choose whether AIRI derives a stable OpenClaw session key automatically or uses a manual one.
+              options:
+                auto: Auto
+                manual: Manual
+        troubleshooting:
+          validators:
+            openai-compatible-check-connectivity:
+              label: OpenClaw HTTP API setup may be incomplete
+              content: >-
+                Make sure OpenClaw is running, the HTTP compatibility API is enabled, and the configured operator token has access to the requested agent targets. For safety, prefer localhost or a private network instead of exposing the OpenClaw API publicly.
       transcriptions:
         playground:
           title: Transcription Playground

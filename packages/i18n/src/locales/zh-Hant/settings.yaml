@@ -215,7 +215,34 @@ pages:
     upload_desc: 點擊或拖曳檔案到此處上傳
   memory:
     description: 存放記憶的地方，以及策略
-    title: 記憶體
+    title: 記憶
+    overview:
+      title: 記憶後端
+      description: 分別設定短期與長期記憶，讓 AIRI 能清楚區分近期上下文與穩定知識。
+      openSettings: 開啟設定
+    status:
+      configured: 已配置
+      validated: 已驗證
+      needsAttention: 需要注意
+      notConfigured: 尚未配置
+      enabled: 已啟用
+      disabled: 已停用
+      enabledValue: 開啟
+      disabledValue: 關閉
+      configuredValue: 就緒
+      incompleteValue: 未完成
+      validatedValue: 通過
+      failedValue: 失敗
+      pendingValue: 待驗證
+    validation:
+      idleTitle: 尚未執行驗證
+      successTitle: 驗證通過
+      errorTitle: 驗證失敗
+      runCheck: 執行檢查
+      configuredPending: 設定已填寫完成，但尚未執行驗證。
+      notConfigured: 請先完成必要欄位，驗證才能通過。
+      configuredLabel: 已配置
+      notConfiguredLabel: 尚未配置
   data:
     title: 資料
     description: 管理已儲存的 AIRI 資料、匯出與重置作業
@@ -401,11 +428,138 @@ pages:
             verbose-json-unsupported: >-
               Your provider did not return verbose_json segments. Confidence filtering had no effect on the last transcription.
     memory-long-term:
-      description: 長期記憶
+      description: 長期記憶專用設定與管理
       title: 長期記憶
+      sections:
+        configuration:
+          title: llm-wiki 設定
+          description: AIRI 會自動管理預設的 llm-wiki 長期知識工作區，無需手動設定路徑。
+      fields:
+        enabled:
+          label: 啟用長期記憶
+          description: 允許 AIRI 使用 llm-wiki 維護整理過的長期知識工作區。
+        workspacePath:
+          label: 工作區路徑
+          description: llm-wiki 工作區所在的根目錄。在 AIRI Electron 裡可以填 llm-wiki、相對於 app data 的路徑，或絕對路徑。
+          placeholder: llm-wiki、./knowledge/wiki 或 /path/to/wiki-workspace
+        indexPath:
+          label: 索引路徑
+          description: AIRI 應視為 wiki 索引入口的檔案。
+          placeholder: index.md
+        overviewPath:
+          label: 概覽路徑
+          description: 作為主要摘要入口的概覽頁面。
+          placeholder: wiki/overview.md
+        queryMode:
+          label: 查詢模式
+          description: 選擇 AIRI 在首版整合時讀取 llm-wiki 的方式。
+          placeholder: 選擇查詢模式
+        allowPromotion:
+          label: 允許升級
+          description: 允許未來的 runtime 整合把合格記憶升級為長期知識。
+        manualReviewRequired:
+          label: 需要人工審核
+          description: 非 trivial 的長期知識更新在接受前必須經過人工審核。
+        personaReviewRequired:
+          label: 需要人格審核
+          description: 與人格設定相關的變更必須經過明確審核。
+        notes:
+          label: 整合備註
+          description: 提供未來 runtime 接線或工作區慣例的補充說明。
+          placeholder: 在此描述工作區慣例、digest 指令或審核規則。
+      notes:
+        title: 首版範圍
+        content: 此頁面現在已支援桌面版 llm-wiki 查詢 recall 與基礎驗證；在 AIRI Electron 上，系統會自動在 app data 目錄初始化並管理預設的 llm-wiki 工作區，因此無需手動設定路徑。完整的 ingest 與 promotion 自動化可於後續再接入。
+      debug:
+        lastRecall: 最近一次 llm-wiki recall
+        latestSources: 最新來源
     memory-short-term:
-      description: 短期記憶
+      description: 短期記憶專用設定與管理
       title: 短期記憶
+      sections:
+        configuration:
+          title: 短期記憶設定
+          description: 設定 AIRI 代管的本機 Mem0 sidecar 與短期記憶範圍。
+        remote:
+          title: 本機 Mem0 sidecar
+          description: AIRI 會在這台 Mac 上啟動並管理本機 Mem0 sidecar，然後透過 HTTP 與它互動。
+      fields:
+        enabled:
+          label: 啟用短期記憶
+          description: 允許 AIRI 透過 AIRI 代管的本機 Mem0 sidecar 保存與檢索短期記憶。
+        openAIApiKey:
+          label: OpenAI API 金鑰
+          description: AIRI 代管的本機 Mem0 sidecar 必填。sidecar 會用 OpenAI 做記憶抽取與 embeddings。
+          placeholder: 輸入你的 OpenAI API 金鑰
+        managedBaseUrl:
+          label: 代管本機 Base URL
+          description: 這個本機 Mem0 sidecar endpoint 會由 AIRI 自動選擇與管理。
+        userId:
+          label: User ID
+          description: Mem0 請求使用的主要記憶範圍識別。
+          placeholder: 例如 user
+        agentId:
+          label: Agent ID
+          description: 可選的 agent 範圍，適合同一個 agent 在多次執行之間共享記憶。
+          placeholder: airi-agent
+        runId:
+          label: Run ID
+          description: 可選的 run 或 session 範圍，適合把記憶限制在單次對話或單個工作流內。
+          placeholder: chat-session-001
+        appId:
+          label: App ID
+          description: 可選的 app 範圍，適合區分同一位使用者在不同 AIRI 入口上的記憶。
+          placeholder: airi-desktop
+        autoRecall:
+          label: 自動 recall
+          description: 在 AIRI 回答前，自動從 AIRI 代管的本機 Mem0 sidecar 查詢相關短期記憶。
+        autoCapture:
+          label: 自動 capture
+          description: 自動把對話回合送到 AIRI 代管的本機 Mem0 sidecar，交由它抽取可保留的記憶。
+        topK:
+          label: Top K
+          description: 單次查詢最多取回的記憶項目數量。
+        searchThreshold:
+          label: 搜尋閾值
+          description: 短期記憶檢索時使用的最低相似度門檻。
+      notes:
+        title: AIRI 代管 sidecar
+        content: AIRI 的短期記憶現在固定使用本機 Mem0 sidecar。sidecar 由 AIRI 啟動與管理，而 AIRI app 本身仍然是透過 HTTP 與它互動。
+      captureTips:
+        title: 如何讓記憶更容易留下來
+        content: 打開自動 capture 後，盡量在聊天裡用短句明確描述事實或偏好。AIRI 會把這一輪對話送到本機 Mem0 sidecar，由它決定哪些資訊值得保留並在後續相關 query 時檢索回來。
+        example1: 例如：請記住，我最喜歡的水果是芒果。
+        example2: 例如：記住，我叫 Ben。
+        example3: 例如：記住，我偏好精確的設定步驟。
+      actions:
+        clear:
+          title: 清理短期記憶
+          description: 清空目前範圍在 AIRI 代管本機 Mem0 sidecar 中的短期記憶項目。
+          button: 清理短期記憶
+          clearing: 清理中...
+          success: 已清理短期記憶。
+      debug:
+        title: Runtime 偵錯
+        description: 用這個面板直接確認 AIRI 最近有沒有把 capture 送到本機 Mem0 sidecar，以及短期記憶 recall 實際查了什麼。
+        lastCapture: 最近一次 capture
+        lastRecall: 最近一次 recall
+        timestamp: 時間
+        resultCount: 數量
+        captureMode: Capture 模式
+        candidates: 候選記憶
+        operations: 操作結果
+        eventLog: 事件紀錄
+        matchReasons: 命中原因
+        latestMemories: 最新記憶
+        category: 類別
+        conflictKey: 衝突鍵
+        matchedBy: 命中依據
+        score: 分數
+        copyJson: 複製 debug JSON
+        copyJsonDone: 已複製
+        copyJsonFailed: 複製失敗
+        emptyPayload: 沒有 payload
+        emptyState: 目前還沒有 runtime 偵錯紀錄。
     messaging-discord:
       description: Discord 訊息與語音聊天
       title: Discord
@@ -679,6 +833,117 @@ pages:
       deepgram-tts:
         description: deepgram.com
         title: Deepgram
+      frieren-rvc-sidecar:
+        description: 由 AIRI 管理、以 embedded Kokoro + RVC 運行的本機 sidecar。
+        title: Frieren RVC Sidecar
+        callout:
+          title: 由 AIRI 管理的本機 sidecar
+          description: AIRI 會以 embedded 模式啟動受管的本機 sidecar，把 bridge 維持在 localhost，並在語音播放前先完成驗證。你可以填入 bridge 目錄繼續沿用外部 checkout，也可以留空改用 AIRI 內建 source，並讓 AIRI 依照 Kokoro 與 RVC 路徑自動產生受管 env 檔。
+        fields:
+          field:
+            bridge-dir:
+              label: Bridge 目錄
+              description: 選填。外部 `frieren-rvc-bridge` checkout 的資料夾路徑，裡面需要包含 `run-local.sh`。留空時會改用 AIRI 內建的 sidecar source。
+              placeholder: 留空以使用 AIRI 內建 sidecar source
+            dual-llm-api-key:
+              label: Dual LLM API Key
+              description: 僅限 bundled 模式。這組 API Key 會被寫入受管的 `sidecar.env`，並以 `DUAL_LLM_API_KEY` 提供給文字回應流程。
+              placeholder: sk-...
+            dual-llm-base-url:
+              label: Dual LLM Base URL
+              description: 僅限 bundled 模式。這個 OpenAI 相容 Base URL 會被寫入受管的 `sidecar.env`，對應 `DUAL_LLM_BASE_URL`。
+              placeholder: https://api.openai.com/v1/
+            dual-llm-model:
+              label: Dual LLM Model
+              description: 僅限 bundled 模式。這個對話模型名稱會被寫入受管的 `sidecar.env`，對應 `DUAL_LLM_MODEL`。
+              placeholder: gpt-4.1-mini
+            profiling-response-format:
+              label: Profiling 回應格式
+              description: 僅限 bundled 模式。改成 `wav` 可以直接量出目前 MP3 編碼額外增加了多少時間。
+              placeholder: mp3 或 wav
+            rvc-device:
+              label: RVC Device Override
+              description: 僅限 bundled 模式。建議固定使用 `cpu`。可填 `cpu` 或 `cuda:0`；目前這個 AIRI managed runtime 上的 `mps` 並不穩定。
+              placeholder: 建議填 cpu，或使用 cuda:0
+            kokoro-project-dir:
+              label: Kokoro 專案目錄
+              description: 僅限 bundled 模式。AIRI 會使用這份本機 `Kokoro-FastAPI` checkout 來做 embedded synthesis，並把路徑寫入受管的 `sidecar.env`。
+              placeholder: /path/to/Kokoro-FastAPI
+            rvc-model-path:
+              label: RVC 模型路徑
+              description: 僅限 bundled 模式。受管 Frieren sidecar 會使用這個 `.pth` 聲音模型檔。
+              placeholder: /path/to/Frieren_e720_s6480.pth
+            rvc-index-path:
+              label: RVC Index 路徑
+              description: 僅限 bundled 模式。與所選 RVC 模型配對的 `.index` 檔路徑。
+              placeholder: /path/to/added_IVF280_Flat_nprobe_1_Frieren_v2.index
+            env-file:
+              label: Env 檔案
+              description: 選填的進階覆寫。AIRI 啟動 sidecar 時會把這個路徑以 `ENV_FILE` 傳入。bundled 模式會優先使用上面的 Kokoro 與 RVC 結構化欄位，其次才回退到 AIRI runtime 目錄中的 `sidecar.env`。
+              placeholder: /path/to/frieren.env，或 AIRI runtime 底下的相對路徑
+        runtime:
+          loading: 正在檢查 Frieren runtime 狀態...
+          progress:
+            title: Runtime 作業進行中
+            install: 正在安裝或修復 AIRI 受管的 Frieren runtime。第一次執行可能需要幾分鐘。
+            import: 正在從 env 檔匯入設定。
+            restart: 正在重新啟動 Frieren sidecar。
+            test-dual-llm: 正在測試 Dual LLM 連線。
+            profile: 正在分析 Frieren 語音耗時。
+          presence:
+            present: 已存在
+            missing: 缺少
+          states:
+            invalid: Runtime 需要處理
+            missing-config: 需要 Kokoro 或 RVC 路徑
+            missing-env-file: 需要 Env 檔案
+            needs-install: 需要安裝或修復
+            ready: 可隨時啟動
+            running: 執行中
+          modes:
+            bundled: AIRI 內建 runtime
+            external: 外部 checkout
+          actions:
+            refresh: 重新整理狀態
+            import-env: 從 env 檔匯入
+            install-or-repair: 安裝或修復 runtime
+            profile: 分析語音耗時
+            test-dual-llm: 測試 Dual LLM
+            restart: 重新啟動 sidecar
+          details:
+            mode: 啟動模式
+            base-url: Base URL
+            dual-llm-api-key: Dual LLM API Key
+            dual-llm-base-url: Dual LLM Base URL
+            dual-llm-model: Dual LLM Model
+            rvc-device: RVC Device Override
+            bridge-dir: Bridge 目錄
+            runtime-root: Runtime 根目錄
+            source-path: 內建 source 路徑
+            venv-path: Python 虛擬環境
+            env-file: Env 檔案
+            bootstrap-log: Bootstrap 日誌
+        import:
+          title: 已匯入的設定
+        dual-llm-test:
+          title: Dual LLM 測試結果
+          duration: '耗時：{durationMs} ms'
+        profiling:
+          title: 語音分段分析
+          text:
+            title: 文字回應耗時
+          speech:
+            title: 語音回應耗時
+          labels:
+            request: 端到端請求
+            total: Sidecar 總耗時
+            llm: LLM
+            kokoro: Kokoro
+            rvc: RVC
+            encode: 編碼
+            cache-hit: Dual text 快取
+        playground:
+          default-text: 您好，這是 Frieren RVC sidecar 的語音測試。
       speech-noop:
         title: 無
         description: 無語音輸出。
@@ -792,6 +1057,36 @@ pages:
       openai:
         description: OpenAi.com
         title: OpenAI
+      openai-subscription:
+        description: AIRI 桌面版專用的實驗性 ChatGPT 訂閱整合。
+        title: OpenAI 訂閱
+        sign-in:
+          title: 連接您的 ChatGPT 訂閱
+          description: 使用擁有 ChatGPT Plus 或 Pro 訂閱的帳號登入。
+          experimentalDescription: 這是實驗性桌面整合。OpenAI 之後可能變更流程或取消相容性，恕不另行通知。
+          action: 使用 ChatGPT 登入
+        comparison:
+          title: 關於這個供應商
+          api:
+            title: OpenAI API
+            description: 使用 API key 與 OpenAI 平台計費的正式開發者 API。
+          subscription:
+            title: ChatGPT 訂閱
+            description: 實驗性桌面流程，透過 ChatGPT Plus 或 Pro 使用權而不是 API 額度。
+        ready:
+          title: 訂閱已連接
+          description: AIRI 現在可以嘗試透過您的 ChatGPT 訂閱工作階段使用相容的 Codex 模型。
+          tipTitle: 使用前請先知道
+          tipDescription: 這條路徑比 OpenAI API 更不穩定；如果 OpenAI 調整 ChatGPT 或 Codex 內部行為，可能會隨時失效。
+          action: 使用這個供應商
+          logout: 中斷連接
+        unsupported:
+          title: 僅支援桌面版
+          description: 這個實驗性供應商目前只支援 AIRI 桌面版，因為它依賴本機瀏覽器回呼流程。
+        validation:
+          check-login:
+            title: 檢查 ChatGPT 訂閱登入
+            reason: 使用這個供應商前，請先登入您的 ChatGPT 訂閱帳號。
       azure-openai:
         description: Azure OpenAI API
         title: Azure OpenAI
@@ -870,6 +1165,42 @@ pages:
         speech-description: Official text-to-speech provider by AIRI.
         transcription-title: Official Transcription Provider
         transcription-description: Official speech-to-text provider by AIRI.
+      openclaw:
+        title: OpenClaw
+        description: 以 agent 為核心的 OpenClaw 原生聊天提供者。
+        fields:
+          field:
+            agent-id:
+              label: Agent ID
+              description: 作為預設驗證與聊天路由目標的 OpenClaw agent 識別名稱。
+              placeholder: default
+            api-key:
+              description: 用於存取 OpenClaw HTTP API 的 operator 等級權杖。
+            api-mode:
+              label: API 模式
+              description: 選擇聊天請求要使用的 OpenClaw 相容端點。
+              options:
+                chat-completions: Chat Completions
+                responses: Responses（預覽）
+            base-url:
+              description: OpenClaw 服務的基礎 URL。AIRI 會自動正規化到 /v1 HTTP API 路徑。
+              placeholder: http://localhost:18789
+            session-key:
+              label: 手動 Session Key
+              description: 當 Session 策略設為手動時使用的明確 session key。
+              placeholder: team-room-1
+            session-strategy:
+              label: Session 策略
+              description: 選擇要由 AIRI 自動推導穩定的 OpenClaw session key，或改用手動指定值。
+              options:
+                auto: 自動
+                manual: 手動
+        troubleshooting:
+          validators:
+            openai-compatible-check-connectivity:
+              label: OpenClaw HTTP API 可能尚未完整啟用
+              content: >-
+                請確認 OpenClaw 正在運行、HTTP 相容 API 已啟用，且目前設定的 operator 權杖可存取對應的 agent targets。為了安全，建議優先使用 localhost 或 private network，而不是直接公開對外。
       transcriptions:
         playground:
           title: 實驗平台

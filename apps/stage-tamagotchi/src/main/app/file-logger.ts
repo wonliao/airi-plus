@@ -54,13 +54,30 @@ export interface FileLoggerHandle {
    * Closes the log file and releases resources.
    */
   close: () => Promise<void>
+  /**
+   * Updates the lifecycle phase of the logger.
+   */
+  setPhase: (phase: FileLoggerPhase) => void
+  /**
+   * Returns the current lifecycle phase of the logger.
+   */
+  getPhase: () => FileLoggerPhase
+  /**
+   * Whether the global post-log hook should still forward logs into the file sink.
+   */
+  shouldCapturePostLog: () => boolean
 }
+
+export type FileLoggerPhase = 'startup' | 'running' | 'shutdown' | 'closed'
 
 export const nullFileLoggerHandle: FileLoggerHandle = {
   logFilePath: null,
   logFileFd: null,
   appendLog: async () => {},
   close: async () => {},
+  setPhase: () => {},
+  getPhase: () => 'closed',
+  shouldCapturePostLog: () => false,
 }
 
 // ============================================================================
@@ -72,6 +89,15 @@ export const nullFileLoggerHandle: FileLoggerHandle = {
  */
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function safeConsolePrint(method: 'error' | 'info', message: string) {
+  // NOTICE: AIRI Electron main-process logs are already persisted via appendLog().
+  // When dev tooling detaches the stdio stream, any console write here can surface
+  // as an uncaught `write EIO` and crash the main process during startup/shutdown.
+  // Keep this hook intentionally silent.
+  void method
+  void message
 }
 
 /**
@@ -94,7 +120,7 @@ async function ensureLogsDirectory(): Promise<string | null> {
   }
   catch (error) {
     const message = getErrorMessage(error)
-    console.error(`[FileLogger] Failed to create logs directory: ${message}`)
+    safeConsolePrint('error', `[FileLogger] Failed to create logs directory: ${message}`)
     return null
   }
 }
@@ -142,15 +168,16 @@ export async function setupFileLogger(): Promise<FileLoggerHandle> {
     const fileHandle = await open(logFilePath, 'a')
     const logFileFd = fileHandle.fd
     let isFileClosed = false
+    let phase: FileLoggerPhase = 'startup'
 
     // Write initialization message
     const sessionStartMessage = `[FileLogger] Initialized - logging to: ${logFilePath}\n`
     await fileHandle.appendFile(sessionStartMessage)
 
-    console.info(`[FileLogger] Session logs: ${logFilePath}`)
+    safeConsolePrint('info', `[FileLogger] Session logs: ${logFilePath}`)
 
     async function appendLog(content: string) {
-      if (isFileClosed) {
+      if (isFileClosed || phase === 'closed') {
         return
       }
 
@@ -161,7 +188,7 @@ export async function setupFileLogger(): Promise<FileLoggerHandle> {
       }
       catch (error) {
         const message = getErrorMessage(error)
-        console.error(`[FileLogger] Failed to write log: ${message}`)
+        safeConsolePrint('error', `[FileLogger] Failed to write log: ${message}`)
       }
     }
 
@@ -170,26 +197,43 @@ export async function setupFileLogger(): Promise<FileLoggerHandle> {
         return
       }
 
+      phase = 'closed'
+
       try {
         await fileHandle.close()
         isFileClosed = true
-        console.info('[FileLogger] File closed successfully')
+        safeConsolePrint('info', '[FileLogger] File closed successfully')
       }
       catch (error) {
         const message = getErrorMessage(error)
-        console.error(`[FileLogger] Failed to close log file: ${message}`)
+        safeConsolePrint('error', `[FileLogger] Failed to close log file: ${message}`)
       }
 
       const size = await getLogFileSize(logFilePath)
       const sizeInfo = size !== null ? ` (${(size / 1024).toFixed(2)} KB)` : ''
-      console.info(`[FileLogger] Session log file: ${logFilePath}${sizeInfo}`)
+      safeConsolePrint('info', `[FileLogger] Session log file: ${logFilePath}${sizeInfo}`)
     }
 
-    return { logFilePath, logFileFd, appendLog, close }
+    function setPhase(nextPhase: FileLoggerPhase) {
+      if (isFileClosed)
+        return
+
+      phase = nextPhase
+    }
+
+    function getPhase() {
+      return phase
+    }
+
+    function shouldCapturePostLog() {
+      return !isFileClosed && phase !== 'shutdown' && phase !== 'closed'
+    }
+
+    return { logFilePath, logFileFd, appendLog, close, setPhase, getPhase, shouldCapturePostLog }
   }
   catch (error) {
     const message = getErrorMessage(error)
-    console.error(`[FileLogger] Failed to create log file - logging to console only: ${message}`)
+    safeConsolePrint('error', `[FileLogger] Failed to create log file - logging to console only: ${message}`)
     return nullFileLoggerHandle
   }
 }

@@ -9,12 +9,14 @@ import { DisplayModelFormat, useDisplayModelsStore } from '../display-models'
 
 export type StageModelRenderer = 'live2d' | 'vrm' | 'disabled' | undefined
 
+const defaultStageModelId = 'preset-live2d-1'
+
 export const useSettingsStageModel = defineStore('settings-stage-model', () => {
   const displayModelsStore = useDisplayModelsStore()
   let stageModelUpdateSequence = 0
   const stageModelStorageKey = 'settings/stage/model'
 
-  const stageModelSelectedState = useLocalStorageManualReset<string>(stageModelStorageKey, 'preset-live2d-1')
+  const stageModelSelectedState = useLocalStorageManualReset<string>(stageModelStorageKey, defaultStageModelId)
   const stageModelSelected = computed<string>({
     get: () => stageModelSelectedState.value,
     set: (value) => {
@@ -56,6 +58,13 @@ export const useSettingsStageModel = defineStore('settings-stage-model', () => {
       return
 
     if (!model) {
+      if (selectedModelId !== defaultStageModelId) {
+        // NOTICE: renderer origin changes or old local storage can leave us with a stale model id.
+        // Fall back to the built-in preset so the Electron stage can recover instead of staying blank.
+        stageModelSelectedState.value = defaultStageModelId
+        return
+      }
+
       replaceStageModelUrl(undefined)
       stageModelSelectedDisplayModel.value = undefined
       stageModelRenderer.value = 'disabled'

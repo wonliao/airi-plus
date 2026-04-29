@@ -1,6 +1,10 @@
+import type { WebSocketBaseEvent, WebSocketEvents } from '@proj-airi/server-sdk'
+import type { JsonSchema } from 'xsschema'
+
+import { ContextUpdateStrategy } from '@proj-airi/server-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { isToolRelatedError } from './llm'
+import { createCallSparkCommandTool, isToolRelatedError, isTrustedOpenClawResultEvent, prepareSparkCommandForSend, shouldExposeOpenClawBridgeTool } from './llm'
 
 describe('isToolRelatedError', () => {
   const positives: [provider: string, msg: string][] = [
@@ -46,4 +50,193 @@ describe('isToolRelatedError', () => {
       expect(isToolRelatedError(new Error(msg))).toBe(false)
     })
   }
+})
+
+describe('prepareSparkCommandForSend', () => {
+  it('preserves OpenClaw destinations so the bridge can receive the task', () => {
+    const command: WebSocketEvents['spark:command'] = {
+      id: 'event-1',
+      commandId: 'command-1',
+      destinations: ['openclaw-bridge'],
+      interrupt: false,
+      priority: 'normal',
+      intent: 'action',
+      contexts: [{
+        id: 'ctx-1',
+        contextId: 'ctx-1',
+        lane: 'openclaw:task',
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        text: 'pwd',
+        metadata: {
+          openclaw: {
+            taskText: 'pwd',
+          },
+        },
+      }],
+    }
+
+    expect(prepareSparkCommandForSend(command).destinations).toEqual(['openclaw-bridge'])
+  })
+
+  it('clears generic destinations to avoid accidental routing', () => {
+    const command: WebSocketEvents['spark:command'] = {
+      id: 'event-2',
+      commandId: 'command-2',
+      destinations: ['unknown-agent'],
+      interrupt: false,
+      priority: 'normal',
+      intent: 'action',
+      contexts: [{
+        id: 'ctx-2',
+        contextId: 'ctx-2',
+        lane: 'general',
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        text: 'do something',
+      }],
+    }
+
+    expect(prepareSparkCommandForSend(command).destinations).toEqual([])
+  })
+})
+
+describe('shouldExposeOpenClawBridgeTool', () => {
+  it('disables the bridge tool when the active provider is native OpenClaw', () => {
+    expect(shouldExposeOpenClawBridgeTool('openclaw/default', { providerId: 'openclaw' })).toBe(false)
+  })
+
+  it('keeps the bridge tool for non-OpenClaw providers', () => {
+    expect(shouldExposeOpenClawBridgeTool('gpt-4o', { providerId: 'openai' })).toBe(true)
+  })
+})
+
+describe('createCallSparkCommandTool', () => {
+  it('sanitizes the tool schema for OpenAI strict mode', async () => {
+    const sparkTool = await createCallSparkCommandTool(() => {})
+    const schema = sparkTool.function.parameters as JsonSchema
+    const props = schema.properties!
+
+    expect(schema.required).toEqual(Object.keys(props))
+
+    const guidance = props.guidance as JsonSchema
+    const guidanceProps = guidance.properties!
+    expect((guidanceProps.personaJson as JsonSchema).type).toBe('string')
+
+    const contexts = props.contexts as JsonSchema
+    const contextItems = contexts.items as JsonSchema
+    const contextProps = contextItems.properties!
+    expect(contextItems.required).toEqual(Object.keys(contextProps))
+
+    expect((contextProps.destinationsJson as JsonSchema).type).toBe('string')
+    expect((contextProps.metadataJson as JsonSchema).type).toBe('string')
+  })
+
+  it('parses personaJson and metadataJson before sending spark commands', async () => {
+    const sent: WebSocketEvents['spark:command'][] = []
+    const sparkTool = await createCallSparkCommandTool(command => sent.push(command))
+
+    const result = await sparkTool.execute({
+      destinations: ['agent-1'],
+      guidance: {
+        type: 'instruction',
+        personaJson: JSON.stringify({ curiosity: 'high', confidence: 'low', invalid: 'oops' }),
+        options: [{
+          label: 'Primary option',
+          steps: ['Do the thing'],
+        }],
+      },
+      contexts: [{
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        text: 'Context payload',
+        destinationsJson: JSON.stringify({ include: ['character'], exclude: ['minecraft'], ignored: true }),
+        metadataJson: JSON.stringify({ priority: 'high', retries: 2, nested: { nope: true } }),
+      }],
+    }, undefined as never)
+
+    expect(result).toContain('spark:command sent')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.guidance).toMatchObject({
+      type: 'instruction',
+      persona: {
+        confidence: 'low',
+        curiosity: 'high',
+      },
+    })
+    expect(sent[0]?.contexts?.[0]?.metadata).toEqual({
+      priority: 'high',
+      retries: 2,
+    })
+    expect(sent[0]?.contexts?.[0]?.destinations).toEqual({
+      exclude: ['minecraft'],
+      include: ['character'],
+    })
+  })
+})
+
+describe('isTrustedOpenClawResultEvent', () => {
+  function createOpenClawResultEvent(pluginId: string): WebSocketBaseEvent<'context:update', WebSocketEvents['context:update']> {
+    return {
+      type: 'context:update',
+      data: {
+        id: 'ctx-event-1',
+        contextId: 'ctx-1',
+        lane: 'openclaw:result',
+        text: '/workspace',
+        strategy: ContextUpdateStrategy.ReplaceSelf,
+        metadata: {
+          openclaw: {
+            commandId: 'command-1',
+            request: {
+              conversationId: 'conversation-1',
+              source: 'stage-ui:chat-explicit-openclaw',
+              userId: 'user-1',
+            },
+            status: 'completed',
+          },
+        },
+      },
+      metadata: {
+        source: {
+          kind: 'plugin',
+          plugin: { id: pluginId },
+          id: 'peer-1',
+        },
+        event: {
+          id: 'evt-1',
+        },
+      },
+    }
+  }
+
+  it('accepts results from the trusted OpenClaw bridge source', () => {
+    const event = createOpenClawResultEvent('openclaw-bridge')
+
+    expect(isTrustedOpenClawResultEvent(event, 'command-1', {
+      conversationId: 'conversation-1',
+      source: 'stage-ui:chat-explicit-openclaw',
+      task: 'pwd',
+      userId: 'user-1',
+    })).toBe(true)
+  })
+
+  it('rejects results from an unexpected source', () => {
+    const event = createOpenClawResultEvent('rogue-module')
+
+    expect(isTrustedOpenClawResultEvent(event, 'command-1', {
+      conversationId: 'conversation-1',
+      source: 'stage-ui:chat-explicit-openclaw',
+      task: 'pwd',
+      userId: 'user-1',
+    })).toBe(false)
+  })
+
+  it('rejects results when the delegated request does not match', () => {
+    const event = createOpenClawResultEvent('openclaw-bridge')
+
+    expect(isTrustedOpenClawResultEvent(event, 'command-1', {
+      conversationId: 'conversation-2',
+      source: 'stage-ui:chat-explicit-openclaw',
+      task: 'pwd',
+      userId: 'user-1',
+    })).toBe(false)
+  })
 })

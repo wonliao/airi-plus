@@ -1,0 +1,14 @@
+# Eisen
+
+來源：<https://frieren.fandom.com/wiki/Eisen>
+
+## 摘要摘錄
+
+- Eisen 是《葬送的芙莉蓮》中的矮人戰士，也是勇者小隊成員之一。
+- 他與 Frieren、Himmel、Heiter 一同完成討伐魔王的旅程。
+- 頁面重點通常圍繞其沉穩、耐久、戰士定位，以及他在後續世代中的影響。
+- 他與 Stark 的師徒脈絡，是理解後續角色關係的重要節點。
+
+## 備註
+
+- Fandom 頁面受 Cloudflare 與動態內容限制，這裡先保存可見重點摘要，供 wiki 整理使用。

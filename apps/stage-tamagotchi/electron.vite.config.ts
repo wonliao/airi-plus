@@ -22,6 +22,12 @@ const sharedCacheDir = resolve(join(import.meta.dirname, '..', '..', '.cache'))
 export default defineConfig({
   main: {
     build: {
+      lib: {
+        entry: {
+          'index': resolve(join(import.meta.dirname, 'src', 'main', 'index.ts')),
+          'mem0-sidecar': resolve(join(import.meta.dirname, 'src', 'main', 'services', 'airi', 'mem0-sidecar', 'entry.ts')),
+        },
+      },
       externalizeDeps: {
         include: [
           'electron-click-drag-plugin',
@@ -68,6 +74,11 @@ export default defineConfig({
 
     resolve: {
       alias: {
+        '@proj-airi/server-sdk': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-sdk', 'src')),
+        '@proj-airi/server-shared': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-shared', 'src')),
+        '@proj-airi/server-shared/types': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-shared', 'src', 'types', 'index.ts')),
+        '@proj-airi/electron-eventa/electron-updater': resolve(join(import.meta.dirname, '..', '..', 'packages', 'electron-eventa', 'src', 'electron-updater', 'index.ts')),
+        '@proj-airi/electron-eventa': resolve(join(import.meta.dirname, '..', '..', 'packages', 'electron-eventa', 'src', 'index.ts')),
         '@proj-airi/i18n': resolve(join(import.meta.dirname, '..', '..', 'packages', 'i18n', 'src')),
       },
     },
@@ -132,6 +143,11 @@ export default defineConfig({
     resolve: {
       alias: {
         '@proj-airi/server-sdk': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-sdk', 'src')),
+        '@proj-airi/server-shared': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-shared', 'src')),
+        '@proj-airi/server-shared/types': resolve(join(import.meta.dirname, '..', '..', 'packages', 'server-shared', 'src', 'types', 'index.ts')),
+        '@proj-airi/stream-kit': resolve(join(import.meta.dirname, '..', '..', 'packages', 'stream-kit', 'src')),
+        '@proj-airi/electron-eventa/electron-updater': resolve(join(import.meta.dirname, '..', '..', 'packages', 'electron-eventa', 'src', 'electron-updater', 'index.ts')),
+        '@proj-airi/electron-eventa': resolve(join(import.meta.dirname, '..', '..', 'packages', 'electron-eventa', 'src', 'index.ts')),
         '@proj-airi/i18n': resolve(join(import.meta.dirname, '..', '..', 'packages', 'i18n', 'src')),
         '@proj-airi/stage-ui': resolve(join(import.meta.dirname, '..', '..', 'packages', 'stage-ui', 'src')),
         '@proj-airi/stage-pages': resolve(join(import.meta.dirname, '..', '..', 'packages', 'stage-pages', 'src')),
@@ -140,6 +156,12 @@ export default defineConfig({
     },
 
     server: {
+      // NOTICE: Keep the Electron renderer on a stable, dedicated dev origin so its
+      // localStorage/IndexedDB state does not appear to "disappear" when Vite falls back
+      // between ports like 5173/5174. Stage Web commonly uses 5173, so Electron uses 5174.
+      host: '127.0.0.1',
+      port: 5174,
+      strictPort: true,
       fs: {
         // To mute errors like:
         //   The request id ".../node_modules/@fontsource/sniglet/files/sniglet-latin-400-normal.woff" is outside of Vite serving allow list.
@@ -210,6 +232,7 @@ export default defineConfig({
               '**/settings/connection/index.vue',
               '**/settings/data/index.vue',
               '**/settings/models/index.vue',
+              '**/settings/providers/chat/openai-subscription.vue',
               '**/settings/system/general.vue',
               '**/settings/modules/mcp.vue',
             ],

@@ -30,10 +30,12 @@ import {
 } from './meta'
 import { frontmatterAssets } from './plugins/vite-frontmatter-assets'
 
+const TRAILING_SLASH_RE = /\/$/
+
 function withBase(url: string) {
   return env.BASE_URL
     ? env.BASE_URL.endsWith('/')
-      ? posix.join(env.BASE_URL.replace(/\/$/, ''), url)
+      ? posix.join(env.BASE_URL.replace(TRAILING_SLASH_RE, ''), url)
       : posix.join(env.BASE_URL, url)
     : url
 }
@@ -297,6 +299,12 @@ export default defineConfig<ThemeConfig>({
                 text: '配置',
                 items: [
                   { text: '配置指南', link: withBase('/zh-Hans/docs/manual/config/') },
+                ],
+              },
+              {
+                text: '集成',
+                items: [
+                  { text: 'AIRI 与 OpenClaw', link: withBase('/zh-Hans/docs/manual/openclaw/') },
                 ],
               },
             ],

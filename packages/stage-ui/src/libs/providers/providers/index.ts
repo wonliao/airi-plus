@@ -1,4 +1,5 @@
 import './openai'
+import './openai-subscription'
 import './aihubmix'
 import './lm-studio'
 import './azure-openai'
@@ -28,6 +29,7 @@ import './ollama'
 import './cloudflare-workers-ai'
 import './azure-ai-foundry'
 import './official'
+import './openclaw'
 
 export {
   getDefinedProvider,

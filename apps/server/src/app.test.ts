@@ -44,6 +44,13 @@ function createTestDeps() {
     providerService: {} as any,
     fluxService: {} as any,
     fluxTransactionService: {} as any,
+    openAISubscriptionAccountService: {
+      isTokenEncryptionConfigured: vi.fn(() => false),
+      getStoredAccountByUserId: vi.fn(),
+      getAccountByUserId: vi.fn(),
+      upsertAccountForUser: vi.fn(),
+      deleteAccountByUserId: vi.fn(),
+    } as any,
     stripeService: {} as any,
     billingService: {} as any,
     billingMq: {} as any,
@@ -62,6 +69,7 @@ function createTestDeps() {
     redis: redis as any,
     env: {
       API_SERVER_URL: 'http://localhost:3000',
+      OPENAI_SUBSCRIPTION_TOKEN_ENCRYPTION_KEY: undefined,
     } as any,
     otel: null,
   }

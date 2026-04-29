@@ -19,7 +19,11 @@
     "./auth": "./src/auth/index.ts",
     "./beat-sync": "./src/beat-sync/index.ts",
     "./electron-renderer": "./src/electron-renderer.d.ts",
-    "./composables": "./src/composables/index.ts"
+    "./composables": "./src/composables/index.ts",
+    "./frieren-speech": "./src/frieren-speech.ts",
+    "./memory": "./src/memory.ts",
+    "./openai-subscription": "./src/openai-subscription.ts",
+    "./openai-subscription-codex": "./src/openai-subscription-codex.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -34,6 +38,7 @@
     "@moeru/eventa": "catalog:",
     "@nekopaw/tempora": "catalog:",
     "@proj-airi/electron-screen-capture": "workspace:^",
-    "@types/audioworklet": "catalog:"
+    "@types/audioworklet": "catalog:",
+    "electron": "catalog:"
   }
 }

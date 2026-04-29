@@ -13,13 +13,24 @@ import { ref, toRaw } from 'vue'
 import { useAnalytics } from '../composables'
 import { useLlmmarkerParser } from '../composables/llm-marker-parser'
 import { categorizeResponse, createStreamingCategorizer } from '../composables/response-categoriser'
-import { createDatetimeContext } from './chat/context-providers'
+import { buildOpenClawSessionHeaders } from '../libs/providers/providers/openclaw/shared'
+import { extractExplicitOpenClawTask } from '../tools'
+import { useAuthStore } from './auth'
+import { buildContextPromptMessage } from './chat/context-prompt'
+import { createDatetimeContext, createMinecraftContext } from './chat/context-providers'
 import { useChatContextStore } from './chat/context-store'
 import { createChatHooks } from './chat/hooks'
+import { determineMemoryRecallStrategy } from './chat/memory-routing'
 import { useChatSessionStore } from './chat/session-store'
 import { useChatStreamStore } from './chat/stream-store'
+import { useContextObservabilityStore } from './devtools/context-observability'
 import { useLLM } from './llm'
 import { useConsciousnessStore } from './modules/consciousness'
+import { useLongTermMemoryStore } from './modules/memory-long-term'
+import { useShortTermMemoryStore } from './modules/memory-short-term'
+import { useSpeechStore } from './modules/speech'
+import { useProvidersStore } from './providers'
+import { useSpeechRuntimeStore } from './speech-runtime'
 
 interface SendOptions {
   model: string
@@ -49,20 +60,37 @@ interface QueuedSend {
   }
 }
 
+export interface QueuedSendSnapshot {
+  sessionId: string
+  generation: number
+  cancelled: boolean
+  messagePreview: string
+  hasAttachments: boolean
+  inputType?: WebSocketEventInputs['type']
+}
+
 export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
   const llmStore = useLLM()
   const consciousnessStore = useConsciousnessStore()
+  const providersStore = useProvidersStore()
+  const authStore = useAuthStore()
   const { activeProvider } = storeToRefs(consciousnessStore)
   const { trackFirstMessage } = useAnalytics()
 
   const chatSession = useChatSessionStore()
   const chatStream = useChatStreamStore()
   const chatContext = useChatContextStore()
+  const contextObservability = useContextObservabilityStore()
   const { activeSessionId } = storeToRefs(chatSession)
   const { streamingMessage } = storeToRefs(chatStream)
+  const longTermMemoryStore = useLongTermMemoryStore()
+  const shortTermMemoryStore = useShortTermMemoryStore()
+  const speechStore = useSpeechStore()
+  const speechRuntimeStore = useSpeechRuntimeStore()
 
   const sending = ref(false)
   const pendingQueuedSends = ref<QueuedSend[]>([])
+  const pendingQueuedSendCount = ref(0)
   const hooks = createChatHooks()
 
   const sendQueue = createQueue<QueuedSend>({
@@ -91,10 +119,12 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
   sendQueue.on('enqueue', (queuedSend) => {
     pendingQueuedSends.value = [...pendingQueuedSends.value, queuedSend]
+    pendingQueuedSendCount.value = pendingQueuedSends.value.length
   })
 
   sendQueue.on('dequeue', (queuedSend) => {
     pendingQueuedSends.value = pendingQueuedSends.value.filter(item => item !== queuedSend)
+    pendingQueuedSendCount.value = pendingQueuedSends.value.length
   })
 
   async function performSend(
@@ -110,14 +140,29 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
     // Inject current datetime context before composing the message
     chatContext.ingestContextMessage(createDatetimeContext())
+    const minecraftContext = createMinecraftContext()
+    if (minecraftContext)
+      chatContext.ingestContextMessage(minecraftContext)
 
     const sendingCreatedAt = Date.now()
+    // TODO: Expire or prune stale runtime contexts from disconnected services before composing.
+    // The Minecraft page already times out service liveness locally, but the shared chat context
+    // snapshot can still retain the last runtime context:update until we add cross-store expiry.
     const streamingMessageContext: ChatStreamEventContext = {
       message: { role: 'user', content: sendingMessage, createdAt: sendingCreatedAt, id: nanoid() },
       contexts: chatContext.getContextsSnapshot(),
       composedMessage: [],
       input: options.input,
     }
+    contextObservability.recordLifecycle({
+      phase: 'before-compose',
+      channel: 'chat',
+      sessionId,
+      textPreview: sendingMessage,
+      details: {
+        contexts: streamingMessageContext.contexts,
+      },
+    })
 
     const isStaleGeneration = () => chatSession.getSessionGeneration(sessionId) !== generation
     const shouldAbort = () => isStaleGeneration()
@@ -127,10 +172,18 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     sending.value = true
 
     const isForegroundSession = () => sessionId === activeSessionId.value
+    const shouldSynchronizeAssistantTextWithSpeech = () =>
+      isForegroundSession() && speechStore.activeSpeechProvider === 'frieren-rvc-sidecar'
 
     const buildingMessage: StreamingAssistantMessage = { role: 'assistant', content: '', slices: [], tool_results: [], createdAt: Date.now(), id: nanoid() }
+    const textRevealBarrier = shouldSynchronizeAssistantTextWithSpeech()
+      ? speechRuntimeStore.createTextRevealBarrier()
+      : null
 
     const updateUI = () => {
+      if (textRevealBarrier)
+        return
+
       if (isForegroundSession()) {
         streamingMessage.value = JSON.parse(JSON.stringify(buildingMessage))
       }
@@ -176,6 +229,48 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         createdAt: sendingCreatedAt,
         id: nanoid(),
       })
+
+      const explicitOpenClawTask = extractExplicitOpenClawTask(sendingMessage)
+      if (explicitOpenClawTask) {
+        const resultText = await llmStore.delegateOpenClawTask({
+          conversationId: sessionId,
+          source: 'stage-ui:chat-explicit-openclaw',
+          task: explicitOpenClawTask,
+          userId: authStore.userId || 'local',
+        })
+
+        buildingMessage.content = resultText
+        buildingMessage.slices.push({
+          type: 'text',
+          text: resultText,
+        })
+        updateUI()
+
+        if (!isStaleGeneration()) {
+          chatSession.appendSessionMessage(sessionId, toRaw(buildingMessage))
+        }
+
+        await hooks.emitStreamEndHooks(streamingMessageContext)
+        await hooks.emitAssistantResponseEndHooks(resultText, streamingMessageContext)
+        await hooks.emitAfterSendHooks(sendingMessage, streamingMessageContext)
+        await hooks.emitAssistantMessageHooks({ ...buildingMessage }, resultText, streamingMessageContext)
+        await hooks.emitChatTurnCompleteHooks({
+          output: { ...buildingMessage },
+          outputText: resultText,
+          toolCalls: [],
+        }, streamingMessageContext)
+        await shortTermMemoryStore.captureMessages([
+          { role: 'user', content: sendingMessage },
+          { role: 'assistant', content: resultText },
+        ])
+
+        if (isForegroundSession()) {
+          streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
+        }
+
+        return
+      }
+
       const sessionMessagesForSend = chatSession.getSessionMessages(sessionId)
 
       const categorizer = createStreamingCategorizer(activeProvider.value)
@@ -261,41 +356,135 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         return rawMessage
       })
 
-      const contextsSnapshot = chatContext.getContextsSnapshot()
-      if (Object.keys(contextsSnapshot).length > 0) {
+      const memoryRecallStrategy = determineMemoryRecallStrategy(sendingMessage)
+      const llmWikiRecall = memoryRecallStrategy.shouldRecallLongTerm
+        ? await longTermMemoryStore.buildRecallPrompt(sendingMessage)
+        : null
+      const mem0Recall = memoryRecallStrategy.shouldRecallShortTerm
+        ? await shortTermMemoryStore.buildRecallPrompt(sendingMessage)
+        : null
+
+      if (!memoryRecallStrategy.shouldRecallLongTerm) {
+        longTermMemoryStore.markRecallSkipped('Long-term recall skipped by routing.', sendingMessage)
+      }
+
+      if (!memoryRecallStrategy.shouldRecallShortTerm) {
+        await shortTermMemoryStore.markRecallSkipped('Short-term recall skipped by routing.', sendingMessage)
+      }
+
+      const injectedRecallPrompts: Array<{ role: 'user', content: string }> = []
+      if (llmWikiRecall) {
+        injectedRecallPrompts.push({
+          role: 'user',
+          content: llmWikiRecall.prompt,
+        })
+      }
+      if (mem0Recall) {
+        injectedRecallPrompts.push({
+          role: 'user',
+          content: mem0Recall.prompt,
+        })
+      }
+
+      if (injectedRecallPrompts.length > 0) {
         const system = newMessages.slice(0, 1)
         const afterSystem = newMessages.slice(1, newMessages.length)
 
         newMessages = [
           ...system,
-          {
-            role: 'user',
-            content: [
-              {
-                type: 'text',
-                text: ''
-                  + 'These are the contextual information retrieved or on-demand updated from other modules, you may use them as context for chat, or reference of the next action, tool call, etc.:\n'
-                  + `${Object.entries(contextsSnapshot).map(([key, value]) => `Module ${key}: ${JSON.stringify(value)}`).join('\n')}\n`,
-              },
-            ],
-          },
+          ...injectedRecallPrompts,
           ...afterSystem,
         ]
       }
 
+      const contextsSnapshot = chatContext.getContextsSnapshot()
+      const contextPromptMessage = buildContextPromptMessage(contextsSnapshot)
+      if (contextPromptMessage) {
+        const system = newMessages.slice(0, 1)
+        const afterSystem = newMessages.slice(1, newMessages.length)
+
+        newMessages = [
+          ...system,
+          contextPromptMessage,
+          ...afterSystem,
+        ]
+
+        contextObservability.recordLifecycle({
+          phase: 'prompt-context-built',
+          channel: 'chat',
+          sessionId,
+          details: {
+            contexts: contextsSnapshot,
+            mem0Recall,
+            llmWikiRecall,
+            memoryRecallStrategy,
+            promptMessage: contextPromptMessage,
+          },
+        })
+      }
+
       streamingMessageContext.composedMessage = newMessages as Message[]
+      contextObservability.capturePromptProjection({
+        sessionId,
+        message: sendingMessage,
+        contexts: contextsSnapshot,
+        promptMessage: injectedRecallPrompts.at(0) ?? contextPromptMessage,
+        composedMessage: newMessages as Message[],
+      })
+      if (mem0Recall || llmWikiRecall) {
+        contextObservability.recordLifecycle({
+          phase: 'prompt-context-built',
+          channel: 'chat',
+          sessionId,
+          details: {
+            mem0Recall,
+            llmWikiRecall,
+            memoryRecallStrategy,
+          },
+        })
+      }
+      contextObservability.recordLifecycle({
+        phase: 'after-compose',
+        channel: 'chat',
+        sessionId,
+        textPreview: sendingMessage,
+        details: {
+          composedMessage: newMessages,
+          mem0Recall,
+          llmWikiRecall,
+          memoryRecallStrategy,
+        },
+      })
 
       await hooks.emitAfterMessageComposedHooks(sendingMessage, streamingMessageContext)
       await hooks.emitBeforeSendHooks(sendingMessage, streamingMessageContext)
 
       let fullText = ''
-      const headers = (options.providerConfig?.headers || {}) as Record<string, string>
+      const resolvedProviderConfig = (options.providerConfig || providersStore.getProviderConfig(activeProvider.value) || {}) as Record<string, unknown>
+      const headers = { ...((resolvedProviderConfig.headers || {}) as Record<string, string>) }
+
+      if (activeProvider.value === 'openclaw') {
+        Object.assign(headers, buildOpenClawSessionHeaders({
+          activeSessionId: chatSession.activeSessionId,
+          fallbackSessionId: sessionId,
+          sessionKey: typeof resolvedProviderConfig.sessionKey === 'string' ? resolvedProviderConfig.sessionKey : undefined,
+          sessionStrategy: resolvedProviderConfig.sessionStrategy === 'manual' ? 'manual' : 'auto',
+        }))
+
+        const underlyingModel = typeof resolvedProviderConfig.underlyingModel === 'string'
+          ? resolvedProviderConfig.underlyingModel.trim()
+          : ''
+        if (underlyingModel) {
+          headers['x-openclaw-model'] = underlyingModel
+        }
+      }
 
       if (shouldAbort())
         return
 
       await llmStore.stream(options.model, options.chatProvider, newMessages as Message[], {
         headers,
+        providerId: activeProvider.value,
         tools: options.tools,
         // NOTICE: xsai stream may emit `finish` before tool steps continue, so keep waiting until
         // the final non-tool finish to avoid ending the chat turn with no assistant reply.
@@ -331,12 +520,17 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
 
       await parser.end()
 
+      await hooks.emitStreamEndHooks(streamingMessageContext)
+      await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
+
+      if (textRevealBarrier) {
+        await speechRuntimeStore.waitForTextRevealBarrier(textRevealBarrier.token)
+        updateUI()
+      }
+
       if (!isStaleGeneration() && buildingMessage.slices.length > 0) {
         chatSession.appendSessionMessage(sessionId, toRaw(buildingMessage))
       }
-
-      await hooks.emitStreamEndHooks(streamingMessageContext)
-      await hooks.emitAssistantResponseEndHooks(fullText, streamingMessageContext)
 
       await hooks.emitAfterSendHooks(sendingMessage, streamingMessageContext)
       await hooks.emitAssistantMessageHooks({ ...buildingMessage }, fullText, streamingMessageContext)
@@ -345,6 +539,10 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
         outputText: fullText,
         toolCalls: sessionMessagesForSend.filter(msg => msg.role === 'tool') as ToolMessage[],
       }, streamingMessageContext)
+      await shortTermMemoryStore.captureMessages([
+        { role: 'user', content: sendingMessage },
+        { role: 'assistant', content: fullText },
+      ])
 
       if (isForegroundSession()) {
         streamingMessage.value = { role: 'assistant', content: '', slices: [], tool_results: [] }
@@ -408,14 +606,28 @@ export const useChatOrchestratorStore = defineStore('chat-orchestrator', () => {
     pendingQueuedSends.value = sessionId
       ? pendingQueuedSends.value.filter(item => item.sessionId !== sessionId)
       : []
+    pendingQueuedSendCount.value = pendingQueuedSends.value.length
+  }
+
+  function getPendingQueuedSendSnapshot() {
+    return pendingQueuedSends.value.map(queued => ({
+      sessionId: queued.sessionId,
+      generation: queued.generation,
+      cancelled: !!queued.cancelled,
+      messagePreview: queued.sendingMessage.slice(0, 120),
+      hasAttachments: !!queued.options.attachments?.length,
+      inputType: queued.options.input?.type,
+    } satisfies QueuedSendSnapshot))
   }
 
   return {
     sending,
+    pendingQueuedSendCount,
 
     ingest,
     ingestOnFork,
     cancelPendingSends,
+    getPendingQueuedSendSnapshot,
 
     clearHooks: hooks.clearHooks,
 

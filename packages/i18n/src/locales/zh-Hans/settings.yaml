@@ -224,7 +224,34 @@ pages:
     upload_desc: 点击或拖拽文件到此处上传
   memory:
     description: 存放记忆的地方，以及策略
-    title: 记忆体
+    title: 记忆
+    overview:
+      title: 记忆后端
+      description: 分别配置短期与长期记忆，让 AIRI 能清楚区分近期上下文与稳定知识。
+      openSettings: 打开设置
+    status:
+      configured: 已配置
+      validated: 已验证
+      needsAttention: 需要关注
+      notConfigured: 尚未配置
+      enabled: 已启用
+      disabled: 已停用
+      enabledValue: 开启
+      disabledValue: 关闭
+      configuredValue: 就绪
+      incompleteValue: 未完成
+      validatedValue: 通过
+      failedValue: 失败
+      pendingValue: 待验证
+    validation:
+      idleTitle: 尚未执行验证
+      successTitle: 验证通过
+      errorTitle: 验证失败
+      runCheck: 执行检查
+      configuredPending: 配置已填写完成，但尚未执行验证。
+      notConfigured: 请先完成必要字段，验证才能通过。
+      configuredLabel: 已配置
+      notConfiguredLabel: 尚未配置
   data:
     title: Data
     description: 管理存储 AIRI 数据、导出和重置
@@ -410,11 +437,138 @@ pages:
             verbose-json-unsupported: >-
               Your provider did not return verbose_json segments. Confidence filtering had no effect on the last transcription.
     memory-long-term:
-      description: 长期记忆
+      description: 长期记忆专用设置与管理
       title: 长期记忆
+      sections:
+        configuration:
+          title: llm-wiki 配置
+          description: AIRI 会自动管理默认的 llm-wiki 长期知识工作区，无需手动配置路径。
+      fields:
+        enabled:
+          label: 启用长期记忆
+          description: 允许 AIRI 使用 llm-wiki 维护整理过的长期知识工作区。
+        workspacePath:
+          label: 工作区路径
+          description: llm-wiki 工作区所在的根目录。在 AIRI Electron 里可以填 llm-wiki、相对于 app data 的路径，或绝对路径。
+          placeholder: llm-wiki、./knowledge/wiki 或 /path/to/wiki-workspace
+        indexPath:
+          label: 索引路径
+          description: AIRI 应视为 wiki 索引入口的文件。
+          placeholder: index.md
+        overviewPath:
+          label: 概览路径
+          description: 作为主要摘要入口的概览页面。
+          placeholder: wiki/overview.md
+        queryMode:
+          label: 查询模式
+          description: 选择 AIRI 在首版集成时读取 llm-wiki 的方式。
+          placeholder: 选择查询模式
+        allowPromotion:
+          label: 允许提升
+          description: 允许未来的 runtime 集成把合格记忆提升为长期知识。
+        manualReviewRequired:
+          label: 需要人工审核
+          description: 非 trivial 的长期知识更新在接受前必须经过人工审核。
+        personaReviewRequired:
+          label: 需要人格审核
+          description: 与人格设定相关的变更必须经过明确审核。
+        notes:
+          label: 集成备注
+          description: 为未来 runtime 接线或工作区约定提供补充说明。
+          placeholder: 在此描述工作区约定、digest 指令或审核规则。
+      notes:
+        title: 首版范围
+        content: 此页面现在已支持桌面版 llm-wiki 查询 recall 与基础验证；在 AIRI Electron 上，系统会自动在 app data 目录初始化并管理默认的 llm-wiki 工作区，因此无需手动配置路径。完整的 ingest 与 promotion 自动化可以在后续再接入。
+      debug:
+        lastRecall: 最近一次 llm-wiki recall
+        latestSources: 最新来源
     memory-short-term:
-      description: 短期记忆
+      description: 短期记忆专用设置与管理
       title: 短期记忆
+      sections:
+        configuration:
+          title: 短期记忆配置
+          description: 配置 AIRI 代管的本机 Mem0 sidecar 与短期记忆范围。
+        remote:
+          title: 本机 Mem0 sidecar
+          description: AIRI 会在这台 Mac 上启动并管理本机 Mem0 sidecar，然后通过 HTTP 与它交互。
+      fields:
+        enabled:
+          label: 启用短期记忆
+          description: 允许 AIRI 通过 AIRI 代管的本机 Mem0 sidecar 保存与检索短期记忆。
+        openAIApiKey:
+          label: OpenAI API 密钥
+          description: AIRI 代管的本机 Mem0 sidecar 必填。sidecar 会用 OpenAI 做记忆提取与 embeddings。
+          placeholder: 输入你的 OpenAI API 密钥
+        managedBaseUrl:
+          label: 代管本机 Base URL
+          description: 这个本机 Mem0 sidecar endpoint 会由 AIRI 自动选择与管理。
+        userId:
+          label: 用户 ID
+          description: Mem0 请求使用的主要记忆范围标识。
+          placeholder: 例如 user
+        agentId:
+          label: Agent ID
+          description: 可选的 Mem0 agent 范围，适合同一个 agent 在多次运行之间共享记忆。
+          placeholder: airi-agent
+        runId:
+          label: Run ID
+          description: 可选的 Mem0 run 或 session 范围，适合把记忆限制在单次对话或单个工作流内。
+          placeholder: chat-session-001
+        appId:
+          label: App ID
+          description: 可选的 Mem0 app 范围，适合区分同一用户在不同 AIRI 入口上的记忆。
+          placeholder: airi-desktop
+        autoRecall:
+          label: 自动 recall
+          description: 在 AIRI 回答前，自动从 AIRI 代管的本机 Mem0 sidecar 查询相关短期记忆。
+        autoCapture:
+          label: 自动 capture
+          description: 自动把对话轮次发送到 AIRI 代管的本机 Mem0 sidecar，由它提取可保留的记忆。
+        topK:
+          label: Top K
+          description: 单次查询最多取回的记忆项目数量。
+        searchThreshold:
+          label: 搜索阈值
+          description: 短期记忆检索时使用的最低相似度阈值。
+      notes:
+        title: AIRI 代管 sidecar
+        content: AIRI 的短期记忆现在固定使用本机 Mem0 sidecar。sidecar 由 AIRI 启动与管理，而 AIRI app 本身仍然是通过 HTTP 与它交互。
+      captureTips:
+        title: 如何让记忆更容易留下来
+        content: 打开自动 capture 后，尽量在聊天里用短句明确描述事实或偏好。AIRI 会把这一轮对话发送到本机 Mem0 sidecar，由它决定哪些信息值得保留，并在后续相关 query 时检索回来。
+        example1: 例如：请记住，我最喜欢的水果是芒果。
+        example2: 例如：记住，我叫 Ben。
+        example3: 例如：记住，我偏好精确的设置步骤。
+      actions:
+        clear:
+          title: 清理短期记忆
+          description: 清空当前范围在 AIRI 代管本机 Mem0 sidecar 中的短期记忆项目。
+          button: 清理短期记忆
+          clearing: 清理中...
+          success: 已清理短期记忆。
+      debug:
+        title: Runtime 调试
+        description: 用这个面板直接确认 AIRI 最近有没有把 capture 发给本机 Mem0 sidecar，以及短期记忆 recall 实际查询了什么。
+        lastCapture: 最近一次 capture
+        lastRecall: 最近一次 recall
+        timestamp: 时间
+        resultCount: 数量
+        captureMode: Capture 模式
+        candidates: 候选记忆
+        operations: 操作结果
+        eventLog: 事件记录
+        matchReasons: 命中原因
+        latestMemories: 最新记忆
+        category: 类别
+        conflictKey: 冲突键
+        matchedBy: 命中依据
+        score: 分数
+        copyJson: 复制 debug JSON
+        copyJsonDone: 已复制
+        copyJsonFailed: 复制失败
+        emptyPayload: 没有 payload
+        emptyState: 目前还没有 runtime 调试记录。
     messaging-discord:
       description: Discord 发消息和语音聊天
       title: Discord
@@ -801,6 +955,36 @@ pages:
       openai:
         description: OpenAi.com
         title: OpenAI
+      openai-subscription:
+        description: AIRI 桌面版专用的实验性 ChatGPT 订阅集成。
+        title: OpenAI 订阅
+        sign-in:
+          title: 连接你的 ChatGPT 订阅
+          description: 使用拥有 ChatGPT Plus 或 Pro 订阅的账号登录。
+          experimentalDescription: 这是实验性桌面集成。OpenAI 后续可能变更流程或取消兼容性，恕不另行通知。
+          action: 使用 ChatGPT 登录
+        comparison:
+          title: 关于这个提供商
+          api:
+            title: OpenAI API
+            description: 使用 API key 并在 OpenAI 平台计费的正式开发者 API。
+          subscription:
+            title: ChatGPT 订阅
+            description: 实验性桌面流程，通过 ChatGPT Plus 或 Pro 使用权而不是 API 额度。
+        ready:
+          title: 订阅已连接
+          description: AIRI 现在可以尝试通过你的 ChatGPT 订阅会话使用兼容的 Codex 模型。
+          tipTitle: 使用前请先了解
+          tipDescription: 这条路径比 OpenAI API 更不稳定；如果 OpenAI 调整 ChatGPT 或 Codex 内部行为，可能会随时失效。
+          action: 使用这个提供商
+          logout: 断开连接
+        unsupported:
+          title: 仅支持桌面版
+          description: 这个实验性提供商目前只支持 AIRI 桌面版，因为它依赖本地浏览器回调流程。
+        validation:
+          check-login:
+            title: 检查 ChatGPT 订阅登录
+            reason: 使用这个提供商前，请先登录你的 ChatGPT 订阅账号。
       azure-openai:
         description: Azure OpenAI API
         title: Azure OpenAI

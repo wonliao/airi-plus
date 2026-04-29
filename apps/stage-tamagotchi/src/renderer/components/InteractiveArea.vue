@@ -2,7 +2,7 @@
 import type { ChatHistoryItem } from '@proj-airi/stage-ui/types/chat'
 
 import { errorMessageFrom } from '@moeru/std'
-import { ChatHistory } from '@proj-airi/stage-ui/components'
+import { ChatHistory, MemoryRuntimeDebug } from '@proj-airi/stage-ui/components'
 import { useChatOrchestratorStore } from '@proj-airi/stage-ui/stores/chat'
 import { useChatSessionStore } from '@proj-airi/stage-ui/stores/chat/session-store'
 import { useChatStreamStore } from '@proj-airi/stage-ui/stores/chat/stream-store'
@@ -189,80 +189,105 @@ async function handleDeleteMessage(index: number) {
         </button>
       </div>
     </div>
-    <div :class="['flex items-center justify-end gap-2 py-1']">
-      <DropdownMenuRoot>
-        <DropdownMenuTrigger as-child>
+    <MemoryRuntimeDebug :class="['mb-1']" />
+    <div
+      :class="[
+        'w-full overflow-hidden rounded-xl border border-primary-200/20 bg-primary-100/50 dark:border-primary-400/20 dark:bg-primary-900/70',
+      ]"
+    >
+      <BasicTextarea
+        v-model="messageInput"
+        :submit-on-enter="false"
+        :placeholder="t('stage.message')"
+        class="ph-no-capture"
+        text="primary-600 dark:primary-100  placeholder:primary-500 dark:placeholder:primary-200"
+        bg="transparent"
+        max-h="[10lh]" min-h="[1lh]"
+        w-full shrink-0 resize-none overflow-y-scroll p-2 font-medium outline-none
+        transition="all duration-250 ease-in-out placeholder:all placeholder:duration-250 placeholder:ease-in-out"
+        @compositionstart="isComposing = true"
+        @compositionend="isComposing = false"
+        @keydown="handleMessageInputKeydown"
+        @paste-file="handleFilePaste"
+      />
+
+      <div :class="['flex items-center justify-between border-t border-primary-200/20 px-2 py-1 dark:border-primary-400/20']">
+        <DropdownMenuRoot>
+          <DropdownMenuTrigger as-child>
+            <button
+              :class="[
+                'max-h-[10lh] min-h-[1lh] flex items-center justify-center rounded-md p-2 outline-none',
+                'transition-colors transition-transform active:scale-95',
+              ]"
+              bg="neutral-100 dark:neutral-800"
+              text="lg neutral-500 dark:neutral-400"
+              :title="t('stage.send-mode.title')"
+            >
+              <div class="i-solar:keyboard-bold-duotone" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuPortal>
+            <DropdownMenuContent
+              align="start"
+              side="top"
+              :side-offset="8"
+              :class="[
+                'z-50 min-w-[180px] rounded-lg border border-primary-200 bg-white p-1 shadow-xl',
+                'dark:border-primary-700 dark:bg-neutral-800',
+                'flex flex-col gap-1',
+              ]"
+            >
+              <DropdownMenuItem
+                v-for="mode in SEND_MODES"
+                :key="mode"
+                :class="[
+                  'w-full flex cursor-pointer items-center rounded-md px-3 py-2 text-left text-xs outline-none transition-colors',
+                  'hover:bg-primary-100 dark:hover:bg-primary-900/50',
+                  sendMode === mode ? 'bg-primary-50 text-primary-600 font-semibold dark:bg-primary-900/20 dark:text-primary-300' : 'text-neutral-500',
+                ]"
+                @select="sendMode = mode"
+              >
+                <div class="mr-2 h-4 w-4 flex shrink-0 items-center justify-center">
+                  <div v-if="sendMode === mode" class="i-ph:check-bold text-base" />
+                </div>
+                <span>{{ sendModeLabels[mode] }}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenuPortal>
+        </DropdownMenuRoot>
+
+        <div :class="['flex items-center gap-2']">
           <button
             :class="[
-              'max-h-[10lh] min-h-[1lh] flex items-center justify-center rounded-md p-2 outline-none',
-              'transition-colors transition-transform active:scale-95',
+              'max-h-[10lh] min-h-[1lh]',
             ]"
             bg="neutral-100 dark:neutral-800"
             text="lg neutral-500 dark:neutral-400"
-            :title="t('stage.send-mode.title')"
+            hover:text="red-500 dark:red-400"
+            flex items-center justify-center rounded-md p-2 outline-none
+            transition-colors transition-transform active:scale-95
+            @click="() => chatSyncStore.requestCleanup()"
           >
-            <div class="i-solar:keyboard-bold-duotone" />
+            <div class="i-solar:trash-bin-2-bold-duotone" />
           </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuPortal>
-          <DropdownMenuContent
-            align="end"
-            side="top"
-            :side-offset="8"
-            :class="[
-              'z-50 min-w-[180px] rounded-lg border border-primary-200 bg-white p-1 shadow-xl',
-              'dark:border-primary-700 dark:bg-neutral-800',
-              'flex flex-col gap-1',
-            ]"
-          >
-            <DropdownMenuItem
-              v-for="mode in SEND_MODES"
-              :key="mode"
-              :class="[
-                'w-full flex cursor-pointer items-center rounded-md px-3 py-2 text-left text-xs outline-none transition-colors',
-                'hover:bg-primary-100 dark:hover:bg-primary-900/50',
-                sendMode === mode ? 'bg-primary-50 text-primary-600 font-semibold dark:bg-primary-900/20 dark:text-primary-300' : 'text-neutral-500',
-              ]"
-              @select="sendMode = mode"
-            >
-              <div class="mr-2 h-4 w-4 flex shrink-0 items-center justify-center">
-                <div v-if="sendMode === mode" class="i-ph:check-bold text-base" />
-              </div>
-              <span>{{ sendModeLabels[mode] }}</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenuPortal>
-      </DropdownMenuRoot>
 
-      <button
-        :class="[
-          'max-h-[10lh] min-h-[1lh]',
-        ]"
-        bg="neutral-100 dark:neutral-800"
-        text="lg neutral-500 dark:neutral-400"
-        hover:text="red-500 dark:red-400"
-        flex items-center justify-center rounded-md p-2 outline-none
-        transition-colors transition-transform active:scale-95
-        @click="() => chatSyncStore.requestCleanup()"
-      >
-        <div class="i-solar:trash-bin-2-bold-duotone" />
-      </button>
+          <button
+            :class="[
+              'h-9 min-w-9 flex items-center justify-center rounded-md px-3 outline-none',
+              'transition-colors transition-transform active:scale-95',
+              messageInput.trim() || attachments.length
+                ? 'bg-primary-500 text-white hover:bg-primary-600'
+                : 'bg-neutral-100 text-neutral-400 dark:bg-neutral-800 dark:text-neutral-500',
+            ]"
+            :disabled="(!messageInput.trim() && !attachments.length) || sending"
+            :title="t('stage.send')"
+            @click="() => void handleSend()"
+          >
+            <div v-if="sending" class="i-svg-spinners:90-ring-with-bg h-5 w-5" />
+            <div v-else class="i-solar:arrow-up-bold-duotone h-5 w-5" />
+          </button>
+        </div>
+      </div>
     </div>
-    <BasicTextarea
-      v-model="messageInput"
-      :submit-on-enter="false"
-      :placeholder="t('stage.message')"
-      class="ph-no-capture"
-      text="primary-600 dark:primary-100  placeholder:primary-500 dark:placeholder:primary-200"
-      border="solid 2 primary-200/20 dark:primary-400/20"
-      bg="primary-100/50 dark:primary-900/70"
-      max-h="[10lh]" min-h="[1lh]"
-      w-full shrink-0 resize-none overflow-y-scroll rounded-xl p-2 font-medium outline-none
-      transition="all duration-250 ease-in-out placeholder:all placeholder:duration-250 placeholder:ease-in-out"
-      @compositionstart="isComposing = true"
-      @compositionend="isComposing = false"
-      @keydown="handleMessageInputKeydown"
-      @paste-file="handleFilePaste"
-    />
   </div>
 </template>

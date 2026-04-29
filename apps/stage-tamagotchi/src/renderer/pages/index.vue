@@ -50,7 +50,12 @@ const statusIslandRef = ref<InstanceType<typeof StatusIsland>>()
 const widgetStageRef = ref<InstanceType<typeof WidgetStage>>()
 const stageCanvas = toRef(() => widgetStageRef.value?.canvasElement())
 const componentStateStage = ref<'pending' | 'loading' | 'mounted'>('pending')
-const stageMounted = computed(() => componentStateStage.value === 'mounted')
+const stageStartupGraceTimedOut = ref(false)
+const stageMounted = computed(() => {
+  return componentStateStage.value === 'mounted'
+    || stageModelRenderer.value === 'disabled'
+    || stageStartupGraceTimedOut.value
+})
 const isLoading = computed(() => !stageMounted.value)
 
 const isIgnoringMouseEvents = ref(false)
@@ -159,6 +164,30 @@ const modelSettingsRuntimeSnapshot = computed<ModelSettingsRuntimeSnapshot>(() =
     updatedAt: Date.now(),
   })
 })
+
+let stageStartupTimeoutHandle: ReturnType<typeof setTimeout> | undefined
+
+watch([componentStateStage, stageModelRenderer], ([componentState, renderer]) => {
+  if (stageStartupTimeoutHandle) {
+    clearTimeout(stageStartupTimeoutHandle)
+    stageStartupTimeoutHandle = undefined
+  }
+
+  if (componentState === 'mounted' || renderer === 'disabled' || renderer === undefined) {
+    stageStartupGraceTimedOut.value = false
+    return
+  }
+
+  // NOTICE: The Electron stage can occasionally get stuck in `pending/loading` after renderer
+  // restarts or stale model state. In that case we still want the app shell and controls to become
+  // usable instead of blocking forever behind the loading overlay.
+  stageStartupGraceTimedOut.value = false
+  stageStartupTimeoutHandle = setTimeout(() => {
+    if (componentStateStage.value !== 'mounted') {
+      stageStartupGraceTimedOut.value = true
+    }
+  }, 4000)
+}, { immediate: true })
 
 watch([isOutsideFor250Ms, isOutsideStatusIslandFor250Ms, isAroundWindowBorderFor250Ms, isOutsideWindow, isTransparent, hearingDialogOpen, fadeOnHoverEnabled, stagePaused], () => {
   if (stagePaused.value) {
@@ -404,6 +433,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (stageStartupTimeoutHandle) {
+    clearTimeout(stageStartupTimeoutHandle)
+    stageStartupTimeoutHandle = undefined
+  }
   postModelSettingsRuntimeChannelEvent({
     type: 'owner-gone',
     ownerInstanceId: modelSettingsRuntimeOwnerInstanceId,

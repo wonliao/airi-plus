@@ -337,6 +337,9 @@ playbackManager.onEnd(({ item }) => {
 
 playbackManager.onStart(({ item }) => {
   nowSpeaking.value = true
+  if (item.text)
+    speechRuntimeStore.resolveNextTextRevealBarrier()
+
   // NOTICE: postCaption and postPresent may throw errors if the BroadcastChannel is closed
   // (e.g., when navigating away from the page). We wrap these in try-catch to prevent
   // breaking playback when the channel is unavailable.

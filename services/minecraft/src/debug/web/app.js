@@ -18,6 +18,68 @@ const CONFIG = {
 }
 
 const SYSTEM_STATE_MARKER = 'The following blackboard provides you with information about your current state:'
+const HTML_AMPERSAND_RE = /&/g
+const HTML_LT_RE = /</g
+const HTML_GT_RE = />/g
+const HTML_QUOTE_RE = /"/g
+const HTML_APOSTROPHE_RE = /'/g
+const USER_MESSAGE_TAG_RE = /^\[(EVENT|FEEDBACK|PERCEPTION|STATE|ERROR_BURST_GUARD|ERROR_BURST|MANDATORY|SCRIPT|ACTION_QUEUE|NO_ACTION_BUDGET|CONTEXT)\]\s*/
+const DOUBLE_NEWLINE_RE = /\n\n/
+const NEWLINE_RE = /\n/g
+
+function parseChatSummary(text) {
+  if (!text.startsWith('Chat from ')) {
+    return null
+  }
+
+  const colonIndex = text.indexOf(':')
+  if (colonIndex <= 'Chat from '.length) {
+    return null
+  }
+
+  const speaker = text.slice('Chat from '.length, colonIndex)
+  const payload = text.slice(colonIndex + 1).trim()
+  if (!payload.startsWith('"') || !payload.endsWith('"')) {
+    return null
+  }
+
+  return {
+    speaker,
+    message: payload.slice(1, -1),
+  }
+}
+
+function parseFeedbackSummary(text) {
+  const colonIndex = text.indexOf(':')
+  if (colonIndex <= 0) {
+    return null
+  }
+
+  const toolName = text.slice(0, colonIndex)
+  const remainder = text.slice(colonIndex + 1).trimStart()
+  const successPrefix = 'Success'
+  const failedPrefix = 'Failed'
+  const status = remainder.startsWith(successPrefix)
+    ? successPrefix
+    : remainder.startsWith(failedPrefix)
+      ? failedPrefix
+      : null
+
+  if (!status) {
+    return null
+  }
+
+  let detail = remainder.slice(status.length)
+  if (detail.startsWith('.')) {
+    detail = detail.slice(1)
+  }
+
+  return {
+    detail: detail.trim(),
+    status,
+    toolName,
+  }
+}
 
 // =============================================================================
 // Utility Functions
@@ -27,11 +89,11 @@ function escapeHtml(text) {
   if (text == null)
     return ''
   return String(text)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
+    .replace(HTML_AMPERSAND_RE, '&amp;')
+    .replace(HTML_LT_RE, '&lt;')
+    .replace(HTML_GT_RE, '&gt;')
+    .replace(HTML_QUOTE_RE, '&quot;')
+    .replace(HTML_APOSTROPHE_RE, '&#39;')
 }
 
 function formatSystemMessageContent(content) {
@@ -577,14 +639,13 @@ function parseUserMessage(content) {
     return { sections: [], raw: '' }
   const sections = []
   // Known section tags in order they may appear
-  const tagPattern = /^\[(EVENT|FEEDBACK|PERCEPTION|STATE|ERROR_BURST_GUARD|ERROR_BURST|MANDATORY|SCRIPT|ACTION_QUEUE|NO_ACTION_BUDGET|CONTEXT)\]\s*/
   // Split on double-newline (the separator used by buildUserMessage)
-  const blocks = content.split(/\n\n/)
+  const blocks = content.split(DOUBLE_NEWLINE_RE)
   for (const block of blocks) {
     const trimmed = block.trim()
     if (!trimmed)
       continue
-    const m = trimmed.match(tagPattern)
+    const m = trimmed.match(USER_MESSAGE_TAG_RE)
     if (m) {
       sections.push({ tag: m[1], text: trimmed.slice(m[0].length) })
     }
@@ -599,7 +660,7 @@ function parseUserMessage(content) {
 class ConversationPanel {
   constructor(client) {
     this.client = client
-    this._mkSession = () => ({ messages: [], greyed: false, activeContext: null, archivedContexts: [], activeContextStartIndex: 0, contextHistoryMessage: null })
+    this._mkSession = () => ({ messages: [], greyed: false })
     this.sessions = [this._mkSession()]
     this.isProcessing = false
     this.autoScroll = true
@@ -651,10 +712,6 @@ class ConversationPanel {
       const cur = this.sessions.at(-1)
       if (cur) {
         cur.messages = data.messages || []
-        cur.activeContext = data.activeContext || null
-        cur.archivedContexts = data.archivedContexts || []
-        cur.activeContextStartIndex = data.activeContextStartIndex ?? 0
-        cur.contextHistoryMessage = data.contextHistoryMessage || null
       }
     }
     this.isProcessing = !!data.isProcessing
@@ -708,16 +765,11 @@ class ConversationPanel {
   // --- Session rendering ---
 
   renderSession(session) {
-    const { messages, activeContext, archivedContexts, contextHistoryMessage } = session
+    const { messages } = session
     if (!messages || messages.length === 0)
       return '<div class="empty-state">No messages yet</div>'
 
     const parts = []
-
-    // Context status bar
-    if (archivedContexts?.length > 0 || activeContext) {
-      parts.push(this.renderContextStatusBar(activeContext, archivedContexts, contextHistoryMessage))
-    }
 
     // Group messages into turns (user+assistant pairs)
     const turns = this.groupIntoTurns(messages)
@@ -758,24 +810,11 @@ class ConversationPanel {
     const n = this.turnCounter
     const userParsed = turn.user ? parseUserMessage(turn.user.content || '') : null
     const eventSection = userParsed?.sections.find(s => s.tag === 'EVENT' || s.tag === 'FEEDBACK')
-    const contextSection = userParsed?.sections.find(s => s.tag === 'CONTEXT')
 
     // Build a short summary for the turn header
     let summary = `Turn ${n}`
     if (eventSection) {
       summary = this.summarizeEvent(eventSection)
-    }
-
-    // Detect context label from the [CONTEXT] section
-    let ctxBadge = ''
-    if (contextSection) {
-      const ctxMatch = contextSection.text.match(/active="([^"]+)"/)
-      if (ctxMatch) {
-        ctxBadge = `<span class="cv-ctx-badge cv-ctx-active">${escapeHtml(ctxMatch[1])}</span>`
-      }
-      else if (contextSection.text.includes('no active context')) {
-        ctxBadge = '<span class="cv-ctx-badge cv-ctx-none">no ctx</span>'
-      }
     }
 
     const turnId = `cv-turn-${n}`
@@ -787,7 +826,6 @@ class ConversationPanel {
         <span class="cv-arrow">\u25B6</span>
         <span class="cv-turn-num">#${n}</span>
         <span class="cv-turn-summary">${escapeHtml(summary)}</span>
-        ${ctxBadge}
       </button>
       <div class="cv-turn-body" id="${turnId}">
         ${userHtml}
@@ -801,9 +839,9 @@ class ConversationPanel {
   summarizeEvent(section) {
     const text = section.text
     // Chat messages: "Chat from X: "message""
-    const chatMatch = text.match(/^Chat from (\w+):\s*"(.+)"$/s)
+    const chatMatch = parseChatSummary(text)
     if (chatMatch)
-      return `Chat from ${chatMatch[1]}: "${chatMatch[2].slice(0, 60)}${chatMatch[2].length > 60 ? '...' : ''}"`
+      return `Chat from ${chatMatch.speaker}: "${chatMatch.message.slice(0, 60)}${chatMatch.message.length > 60 ? '...' : ''}"`
 
     // Perception Signal
     if (text.startsWith('Perception Signal:'))
@@ -823,16 +861,15 @@ class ConversationPanel {
 
     // FEEDBACK: "toolName: Success/Failed. details"
     if (section.tag === 'FEEDBACK') {
-      // eslint-disable-next-line regexp/no-super-linear-backtracking
-      const fbMatch = text.match(/^(\w+):\s*(Success|Failed)\.?\s*(.*)$/s)
+      const fbMatch = parseFeedbackSummary(text)
       if (fbMatch) {
-        const detail = fbMatch[3].slice(0, 50)
-        return `${fbMatch[1]}: ${fbMatch[2]}${detail ? ` — ${detail}${fbMatch[3].length > 50 ? '...' : ''}` : ''}`
+        const detail = fbMatch.detail.slice(0, 50)
+        return `${fbMatch.toolName}: ${fbMatch.status}${detail ? ` — ${detail}${fbMatch.detail.length > 50 ? '...' : ''}` : ''}`
       }
     }
 
     // Fallback: truncate
-    const flat = text.replace(/\n/g, ' ').slice(0, 70)
+    const flat = text.replace(NEWLINE_RE, ' ').slice(0, 70)
     return flat + (text.length > 70 ? '...' : '')
   }
 
@@ -883,7 +920,7 @@ class ConversationPanel {
     }
 
     // SCRIPT, PERCEPTION, OTHER — collapsible
-    const preview = section.text.slice(0, 60).replace(/\n/g, ' ')
+    const preview = section.text.slice(0, 60).replace(NEWLINE_RE, ' ')
     return `<div class="cv-section ${colorCls}">
       <button class="cv-section-toggle" data-toggle="${id}">
         <span class="cv-arrow">\u25B6</span>
@@ -905,7 +942,7 @@ class ConversationPanel {
 
     if (reasoning) {
       const rid = `cv-reason-${turnNum}`
-      const preview = reasoning.slice(0, 80).replace(/\n/g, ' ')
+      const preview = reasoning.slice(0, 80).replace(NEWLINE_RE, ' ')
       parts.push(`<div class="cv-reasoning">
         <button class="cv-reasoning-toggle" data-toggle="${rid}">
           <span class="cv-arrow">\u25B6</span>
@@ -926,49 +963,6 @@ class ConversationPanel {
     }
 
     return `<div class="cv-assistant">${parts.join('')}</div>`
-  }
-
-  // --- Context status bar ---
-
-  renderContextStatusBar(activeContext, archivedContexts, contextHistoryMessage) {
-    const parts = []
-    // Active context indicator
-    if (activeContext?.label) {
-      parts.push(`<span class="cv-ctx-status-active"><span class="cv-ctx-dot"></span> ${escapeHtml(activeContext.label)} (${activeContext.messageCount} msgs)</span>`)
-    }
-    else {
-      parts.push('<span class="cv-ctx-status-idle"><span class="cv-ctx-dot cv-ctx-dot-idle"></span> No active context</span>')
-    }
-
-    // Archived count
-    if (archivedContexts?.length > 0) {
-      const archId = `cv-archived-${Math.random().toString(36).slice(2, 6)}`
-      const items = archivedContexts.map((ctx, i) => {
-        const time = new Date(ctx.archivedAt).toLocaleTimeString()
-        return `<div class="cv-arch-item">
-          <span class="cv-arch-idx">#${i + 1}</span>
-          <strong>${escapeHtml(ctx.label || 'unnamed')}</strong>
-          <span class="cv-arch-meta">${ctx.turns}t &middot; ${time}</span>
-          <div class="cv-arch-summary">${escapeHtml(ctx.summary)}</div>
-        </div>`
-      }).join('')
-      parts.push(`<button class="cv-ctx-arch-btn" data-toggle="${archId}">
-        <span class="cv-arrow">\u25B6</span> ${archivedContexts.length} archived
-      </button>`)
-      // Append the collapsible body after the status bar
-      parts.push(`<div class="cv-ctx-arch-body" id="${archId}">${items}</div>`)
-    }
-
-    // Context history prefix
-    if (contextHistoryMessage) {
-      const chId = `cv-ctxhist-${Math.random().toString(36).slice(2, 6)}`
-      parts.push(`<button class="cv-ctx-hist-btn" data-toggle="${chId}">
-        <span class="cv-arrow">\u25B6</span> prefix
-      </button>`)
-      parts.push(`<div class="cv-ctx-hist-body" id="${chId}"><pre class="cv-ctx-hist-content">${escapeHtml(contextHistoryMessage)}</pre></div>`)
-    }
-
-    return `<div class="cv-ctx-bar">${parts.join('')}</div>`
   }
 
   // --- System message ---

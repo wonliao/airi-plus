@@ -274,6 +274,17 @@ export const electronAuthCallback = defineEventa<ElectronAuthTokens>('eventa:eve
 export const electronAuthCallbackError = defineEventa<{ error: string }>('eventa:event:electron:auth:callback-error')
 export const electronAuthLogout = defineInvokeEventa<void>('eventa:invoke:electron:auth:logout')
 
+export interface ElectronOpenAISubscriptionTokens {
+  accessToken: string
+  refreshToken: string
+  expiresIn: number
+  accountId?: string
+}
+export const electronOpenAISubscriptionAuthStartLogin = defineInvokeEventa<void>('eventa:invoke:electron:providers:openai-subscription:start-login')
+export const electronOpenAISubscriptionAuthCallback = defineEventa<ElectronOpenAISubscriptionTokens>('eventa:event:electron:providers:openai-subscription:callback')
+export const electronOpenAISubscriptionAuthCallbackError = defineEventa<{ error: string }>('eventa:event:electron:providers:openai-subscription:callback-error')
+export const electronOpenAISubscriptionAuthLogout = defineInvokeEventa<void>('eventa:invoke:electron:providers:openai-subscription:logout')
+
 export const i18nSetLocale = defineInvokeEventa<void, Locale>('eventa:invoke:electron:i18n:set-locale')
 export const i18nGetLocale = defineInvokeEventa<Locale>('eventa:invoke:electron:i18n:get-locale')
 
