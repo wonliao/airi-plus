@@ -1,17 +1,26 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { providerOpenAISubscription } from './index'
 
 const {
-  getStoredOpenAISubscriptionTokensMock,
+  hasOpenAISubscriptionLoginMock,
+  isStageTamagotchiMock,
+  isStageWebMock,
 } = vi.hoisted(() => ({
-  getStoredOpenAISubscriptionTokensMock: vi.fn(),
+  hasOpenAISubscriptionLoginMock: vi.fn(),
+  isStageTamagotchiMock: vi.fn(),
+  isStageWebMock: vi.fn(),
+}))
+
+vi.mock('@proj-airi/stage-shared', () => ({
+  isStageTamagotchi: isStageTamagotchiMock,
+  isStageWeb: isStageWebMock,
 }))
 
 vi.mock('../../../../libs/openai-subscription-auth', () => ({
   OPENAI_SUBSCRIPTION_ALLOWED_MODELS: ['gpt-5.4'],
   createOpenAISubscriptionFetch: vi.fn(),
-  getStoredOpenAISubscriptionTokens: getStoredOpenAISubscriptionTokensMock,
+  hasOpenAISubscriptionLogin: hasOpenAISubscriptionLoginMock,
 }))
 
 describe('providerOpenAISubscription login validator', () => {
@@ -19,12 +28,24 @@ describe('providerOpenAISubscription login validator', () => {
     t: (key: string) => key,
   })
 
+  beforeEach(() => {
+    vi.clearAllMocks()
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+  })
+
+  it('is available on web and desktop runtimes', () => {
+    isStageWebMock.mockReturnValue(true)
+    isStageTamagotchiMock.mockReturnValue(false)
+    expect(providerOpenAISubscription.isAvailableBy?.()).toBe(true)
+
+    isStageWebMock.mockReturnValue(false)
+    isStageTamagotchiMock.mockReturnValue(true)
+    expect(providerOpenAISubscription.isAvailableBy?.()).toBe(true)
+  })
+
   it('passes when an auth token exists', async () => {
-    getStoredOpenAISubscriptionTokensMock.mockReturnValue({
-      accessToken: 'token-123',
-      refreshToken: 'refresh-123',
-      expiresAt: Date.now() + 60_000,
-    })
+    hasOpenAISubscriptionLoginMock.mockResolvedValue(true)
 
     const result = await validator?.validator({}, { t: (key: string) => key })
 
@@ -32,7 +53,7 @@ describe('providerOpenAISubscription login validator', () => {
   })
 
   it('fails when the user is not signed in', async () => {
-    getStoredOpenAISubscriptionTokensMock.mockReturnValue(null)
+    hasOpenAISubscriptionLoginMock.mockResolvedValue(false)
 
     const result = await validator?.validator({}, { t: (key: string) => key })
 

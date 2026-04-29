@@ -1,8 +1,24 @@
+import type { OpenAISubscriptionJwtClaims } from '@proj-airi/stage-shared/openai-subscription-codex'
+
+import { isStageTamagotchi, isStageWeb } from '@proj-airi/stage-shared'
 import { proxyOpenAISubscriptionFetchOnDesktop } from '@proj-airi/stage-shared/openai-subscription'
+import {
+  extractOpenAISubscriptionAccountId,
+  extractOpenAISubscriptionAccountIdFromClaims,
+
+  parseOpenAISubscriptionJwtClaims,
+} from '@proj-airi/stage-shared/openai-subscription-codex'
+
+import { getAuthToken } from './auth'
+import { SERVER_URL } from './server'
 
 export const OPENAI_SUBSCRIPTION_AUTH_STORAGE_KEY = 'auth/v1/providers/openai-subscription'
 export const OPENAI_SUBSCRIPTION_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const OPENAI_SUBSCRIPTION_ISSUER = 'https://auth.openai.com'
+export const OPENAI_SUBSCRIPTION_SERVER_PROXY_PATH = '/api/v1/openai-subscription/proxy'
+export const OPENAI_SUBSCRIPTION_SERVER_STATUS_PATH = '/api/v1/openai-subscription/status'
+export const OPENAI_SUBSCRIPTION_SERVER_OAUTH_START_PATH = '/api/v1/openai-subscription/oauth/start'
+export const OPENAI_SUBSCRIPTION_SERVER_LOGOUT_PATH = '/api/v1/openai-subscription/logout'
 export const OPENAI_SUBSCRIPTION_CODEX_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
 export const OPENAI_SUBSCRIPTION_ALLOWED_MODELS = [
   'gpt-5.1-codex',
@@ -14,8 +30,6 @@ export const OPENAI_SUBSCRIPTION_ALLOWED_MODELS = [
   'gpt-5.4',
   'gpt-5.4-mini',
 ] as const
-const BASE64_URL_DASH_PATTERN = /-/g
-const BASE64_URL_UNDERSCORE_PATTERN = /_/g
 
 export interface OpenAISubscriptionTokens {
   accessToken: string
@@ -24,19 +38,23 @@ export interface OpenAISubscriptionTokens {
   accountId?: string
 }
 
-interface OpenAISubscriptionTokenResponse {
-  access_token: string
-  refresh_token: string
-  expires_in?: number
-  id_token?: string
+export {
+  extractOpenAISubscriptionAccountId,
+  extractOpenAISubscriptionAccountIdFromClaims,
+  type OpenAISubscriptionJwtClaims,
+  parseOpenAISubscriptionJwtClaims,
 }
 
-interface OpenAISubscriptionJwtClaims {
-  'chatgpt_account_id'?: string
-  'organizations'?: Array<{ id: string }>
-  'https://api.openai.com/auth'?: {
-    chatgpt_account_id?: string
-  }
+export interface OpenAISubscriptionServerStatus {
+  connected: boolean
+  accountId?: string
+  expiresAt?: number
+}
+
+interface OpenAISubscriptionServerLoginStartResponse {
+  url?: string
+  authorizationUrl?: string
+  redirectUrl?: string
 }
 
 function getLocalStorage(): Storage | null {
@@ -46,49 +64,67 @@ function getLocalStorage(): Storage | null {
   return globalThis.localStorage
 }
 
-function decodeBase64Url(value: string): string {
-  const normalized = value.replace(BASE64_URL_DASH_PATTERN, '+').replace(BASE64_URL_UNDERSCORE_PATTERN, '/')
-  const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+function getStoredAiriAuthToken(): string | null {
+  if (typeof globalThis === 'undefined' || !('localStorage' in globalThis))
+    return null
 
-  if (typeof globalThis.atob === 'function') {
-    const binary = globalThis.atob(padded)
-    const bytes = Uint8Array.from(binary, char => char.charCodeAt(0))
-    return new TextDecoder().decode(bytes)
-  }
-
-  throw new Error('No base64 decoder available in this runtime')
+  return getAuthToken()
 }
 
-export function parseOpenAISubscriptionJwtClaims(token: string): OpenAISubscriptionJwtClaims | undefined {
-  const parts = token.split('.')
-  if (parts.length !== 3)
+function createOpenAISubscriptionServerUrl(path: string): URL {
+  return new URL(path, SERVER_URL)
+}
+
+function createOpenAISubscriptionServerHeaders(headersInit?: RequestInit['headers']): Headers {
+  const headers = new Headers(headersInit)
+  const token = getStoredAiriAuthToken()
+  if (!token)
+    throw new Error('Sign in to AIRI before connecting OpenAI subscription')
+
+  headers.set('Authorization', `Bearer ${token}`)
+  return headers
+}
+
+function getCurrentBrowserLocationHref(): string | undefined {
+  const location = (globalThis as { location?: { href?: string } }).location
+  return location?.href
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function normalizeOpenAISubscriptionServerStatus(payload: unknown): OpenAISubscriptionServerStatus {
+  if (!isRecord(payload))
+    return { connected: false }
+
+  const connected = payload.connected === true
+    || payload.authenticated === true
+    || payload.signedIn === true
+    || payload.hasSession === true
+  const expiresAt = typeof payload.expiresAt === 'number'
+    ? payload.expiresAt
+    : typeof payload.accessTokenExpiresAt === 'string'
+      ? Date.parse(payload.accessTokenExpiresAt)
+      : undefined
+
+  return {
+    connected,
+    ...(typeof payload.accountId === 'string'
+      ? { accountId: payload.accountId }
+      : typeof payload.chatgptAccountId === 'string'
+        ? { accountId: payload.chatgptAccountId }
+        : {}),
+    ...(typeof expiresAt === 'number' && Number.isFinite(expiresAt) ? { expiresAt } : {}),
+  }
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+  const text = await response.text()
+  if (!text)
     return undefined
 
-  try {
-    return JSON.parse(decodeBase64Url(parts[1])) as OpenAISubscriptionJwtClaims
-  }
-  catch {
-    return undefined
-  }
-}
-
-export function extractOpenAISubscriptionAccountIdFromClaims(claims: OpenAISubscriptionJwtClaims): string | undefined {
-  return claims.chatgpt_account_id
-    || claims['https://api.openai.com/auth']?.chatgpt_account_id
-    || claims.organizations?.[0]?.id
-}
-
-export function extractOpenAISubscriptionAccountId(tokens: Pick<OpenAISubscriptionTokenResponse, 'access_token' | 'id_token'>): string | undefined {
-  if (tokens.id_token) {
-    const claims = parseOpenAISubscriptionJwtClaims(tokens.id_token)
-    const accountId = claims && extractOpenAISubscriptionAccountIdFromClaims(claims)
-    if (accountId) {
-      return accountId
-    }
-  }
-
-  const accessClaims = parseOpenAISubscriptionJwtClaims(tokens.access_token)
-  return accessClaims ? extractOpenAISubscriptionAccountIdFromClaims(accessClaims) : undefined
+  return JSON.parse(text)
 }
 
 export function getStoredOpenAISubscriptionTokens(): OpenAISubscriptionTokens | null {
@@ -156,35 +192,132 @@ async function resolveRequestBody(request: Request): Promise<string | undefined>
   return request.clone().text()
 }
 
+async function createDesktopOpenAISubscriptionResponse(input: string | Request | URL, init?: RequestInit): Promise<Response> {
+  const tokens = getStoredOpenAISubscriptionTokens()
+  if (!tokens) {
+    throw new Error('OpenAI subscription login is missing or expired')
+  }
+
+  const request = new Request(input, init)
+
+  const proxyResult = await proxyOpenAISubscriptionFetchOnDesktop({
+    request: {
+      url: request.url,
+      method: request.method,
+      headers: collectHeaderEntries(request.headers),
+      body: await resolveRequestBody(request),
+    },
+    tokens,
+  })
+
+  if (!proxyResult) {
+    throw new Error('OpenAI subscription desktop proxy is unavailable')
+  }
+
+  setStoredOpenAISubscriptionTokens(proxyResult.tokens)
+
+  return new Response(proxyResult.response.body, {
+    status: proxyResult.response.status,
+    statusText: proxyResult.response.statusText,
+    headers: new Headers(proxyResult.response.headers),
+  })
+}
+
+async function createWebOpenAISubscriptionResponse(input: string | Request | URL, init?: RequestInit): Promise<Response> {
+  const request = new Request(input, init)
+  const headers = createOpenAISubscriptionServerHeaders({
+    'Content-Type': 'application/json',
+  })
+  const body = await resolveRequestBody(request)
+
+  return globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_PROXY_PATH), {
+    method: 'POST',
+    headers,
+    credentials: 'omit',
+    body: body || '{}',
+  })
+}
+
+export async function fetchOpenAISubscriptionStatus(): Promise<OpenAISubscriptionServerStatus> {
+  const headers = createOpenAISubscriptionServerHeaders()
+  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_STATUS_PATH), {
+    method: 'GET',
+    headers,
+    credentials: 'omit',
+  })
+
+  if (response.status === 401) {
+    return { connected: false }
+  }
+
+  if (!response.ok) {
+    throw new Error(`OpenAI subscription status request failed with HTTP ${response.status}`)
+  }
+
+  return normalizeOpenAISubscriptionServerStatus(await parseJsonResponse(response))
+}
+
+export async function startOpenAISubscriptionLogin(): Promise<string> {
+  const headers = createOpenAISubscriptionServerHeaders({
+    'Content-Type': 'application/json',
+  })
+  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_OAUTH_START_PATH), {
+    method: 'POST',
+    headers,
+    credentials: 'omit',
+    redirect: 'manual',
+    body: JSON.stringify({
+      returnTo: getCurrentBrowserLocationHref(),
+    }),
+  })
+
+  const location = response.headers.get('Location')
+  if (location)
+    return new URL(location, SERVER_URL).toString()
+
+  if (!response.ok) {
+    throw new Error(`OpenAI subscription login request failed with HTTP ${response.status}`)
+  }
+
+  const payload = await parseJsonResponse(response) as OpenAISubscriptionServerLoginStartResponse | undefined
+  const url = payload?.url ?? payload?.authorizationUrl ?? payload?.redirectUrl
+  if (!url)
+    throw new Error('OpenAI subscription login response did not include a redirect URL')
+
+  return new URL(url, SERVER_URL).toString()
+}
+
+export async function logoutOpenAISubscription(): Promise<void> {
+  const headers = createOpenAISubscriptionServerHeaders()
+  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_LOGOUT_PATH), {
+    method: 'POST',
+    headers,
+    credentials: 'omit',
+  })
+
+  if (!response.ok && response.status !== 401) {
+    throw new Error(`OpenAI subscription logout request failed with HTTP ${response.status}`)
+  }
+}
+
+export async function hasOpenAISubscriptionLogin(): Promise<boolean> {
+  if (isStageTamagotchi())
+    return !!getStoredOpenAISubscriptionTokens()?.refreshToken
+
+  if (isStageWeb())
+    return (await fetchOpenAISubscriptionStatus()).connected
+
+  return false
+}
+
 export function createOpenAISubscriptionFetch() {
   return async (input: string | Request | URL, init?: RequestInit) => {
-    const tokens = getStoredOpenAISubscriptionTokens()
-    if (!tokens) {
-      throw new Error('OpenAI subscription login is missing or expired')
-    }
+    if (isStageTamagotchi())
+      return createDesktopOpenAISubscriptionResponse(input, init)
 
-    const request = new Request(input, init)
+    if (isStageWeb())
+      return createWebOpenAISubscriptionResponse(input, init)
 
-    const proxyResult = await proxyOpenAISubscriptionFetchOnDesktop({
-      request: {
-        url: request.url,
-        method: request.method,
-        headers: collectHeaderEntries(request.headers),
-        body: await resolveRequestBody(request),
-      },
-      tokens,
-    })
-
-    if (!proxyResult) {
-      throw new Error('OpenAI subscription desktop proxy is unavailable')
-    }
-
-    setStoredOpenAISubscriptionTokens(proxyResult.tokens)
-
-    return new Response(proxyResult.response.body, {
-      status: proxyResult.response.status,
-      statusText: proxyResult.response.statusText,
-      headers: new Headers(proxyResult.response.headers),
-    })
+    throw new Error('OpenAI subscription provider is unavailable in this runtime')
   }
 }

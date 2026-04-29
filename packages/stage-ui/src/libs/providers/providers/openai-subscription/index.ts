@@ -1,10 +1,11 @@
-import { isStageTamagotchi } from '@proj-airi/stage-shared'
+import { errorMessageFrom } from '@moeru/std'
+import { isStageTamagotchi, isStageWeb } from '@proj-airi/stage-shared'
 import { createOpenAI } from '@xsai-ext/providers/create'
 import { z } from 'zod'
 
 import {
   createOpenAISubscriptionFetch,
-  getStoredOpenAISubscriptionTokens,
+  hasOpenAISubscriptionLogin,
   OPENAI_SUBSCRIPTION_ALLOWED_MODELS,
 } from '../../../../libs/openai-subscription-auth'
 import { defineProvider } from '../registry'
@@ -13,17 +14,21 @@ const openAISubscriptionConfigSchema = z.object({})
 
 const OPENAI_SUBSCRIPTION_BASE_URL = 'https://api.openai.com/v1'
 
+function isOpenAISubscriptionAvailable() {
+  return isStageTamagotchi() || isStageWeb()
+}
+
 export const providerOpenAISubscription = defineProvider({
   id: 'openai-subscription',
   order: 6,
   name: 'OpenAI (Subscription)',
   nameLocalize: ({ t }) => t('settings.pages.providers.provider.openai-subscription.title'),
-  description: 'Experimental ChatGPT subscription integration for desktop AIRI.',
+  description: 'Experimental ChatGPT subscription integration for AIRI.',
   descriptionLocalize: ({ t }) => t('settings.pages.providers.provider.openai-subscription.description'),
   tasks: ['chat'],
   icon: 'i-lobe-icons:openai',
   requiresCredentials: false,
-  isAvailableBy: isStageTamagotchi,
+  isAvailableBy: isOpenAISubscriptionAvailable,
 
   createProviderConfig: () => openAISubscriptionConfigSchema,
   createProvider(_config) {
@@ -44,13 +49,26 @@ export const providerOpenAISubscription = defineProvider({
         id: 'openai-subscription:check-login',
         name: t('settings.pages.providers.provider.openai-subscription.validation.check-login.title'),
         validator: async () => {
-          const tokens = getStoredOpenAISubscriptionTokens()
-          if (tokens?.refreshToken) {
+          try {
+            if (await hasOpenAISubscriptionLogin()) {
+              return {
+                errors: [],
+                reason: '',
+                reasonKey: '',
+                valid: true,
+              }
+            }
+          }
+          catch (error) {
+            const reason = errorMessageFrom(error) ?? t('settings.pages.providers.provider.openai-subscription.validation.check-login.reason')
             return {
-              errors: [],
-              reason: '',
-              reasonKey: '',
-              valid: true,
+              errors: [{
+                error: new Error(reason),
+                errorKey: 'settings.pages.providers.provider.openai-subscription.validation.check-login.reason',
+              }],
+              reason,
+              reasonKey: 'settings.pages.providers.provider.openai-subscription.validation.check-login.reason',
+              valid: false,
             }
           }
 

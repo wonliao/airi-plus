@@ -22,7 +22,8 @@
     "./composables": "./src/composables/index.ts",
     "./frieren-speech": "./src/frieren-speech.ts",
     "./memory": "./src/memory.ts",
-    "./openai-subscription": "./src/openai-subscription.ts"
+    "./openai-subscription": "./src/openai-subscription.ts",
+    "./openai-subscription-codex": "./src/openai-subscription-codex.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

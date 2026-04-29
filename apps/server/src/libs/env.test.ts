@@ -11,9 +11,11 @@ describe('parseEnv', () => {
       AUTH_GOOGLE_CLIENT_SECRET: 'google-secret',
       AUTH_GITHUB_CLIENT_ID: 'github-client',
       AUTH_GITHUB_CLIENT_SECRET: 'github-secret',
+      OPENAI_SUBSCRIPTION_TOKEN_ENCRYPTION_KEY: 'optional-key',
     })
 
     expect(env.DATABASE_URL).toBe('postgres://example')
     expect(env.REDIS_URL).toBe('redis://example')
+    expect(env.OPENAI_SUBSCRIPTION_TOKEN_ENCRYPTION_KEY).toBe('optional-key')
   })
 })
