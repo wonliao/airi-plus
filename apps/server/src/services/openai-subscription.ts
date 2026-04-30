@@ -2,6 +2,7 @@ import type { Database } from '../libs/db'
 
 import { eq } from 'drizzle-orm'
 
+import { user } from '../schemas/accounts'
 import { createOpenAISubscriptionTokenCipher } from './openai-subscription-crypto'
 
 import * as schema from '../schemas/openai-subscription'
@@ -37,6 +38,17 @@ export function createOpenAISubscriptionAccountService(db: Database, encryptionK
     },
 
     getStoredAccountByUserId,
+
+    async ensureLocalSubscriptionUser(userId: string) {
+      await db.insert(user)
+        .values({
+          id: userId,
+          name: 'Local OpenAI Subscription',
+          email: `${userId.replaceAll(':', '-')}@local.openai-subscription.airi`,
+          emailVerified: true,
+        })
+        .onConflictDoNothing()
+    },
 
     async getAccountByUserId(userId: string): Promise<OpenAISubscriptionAccountWithTokens | undefined> {
       const account = await getStoredAccountByUserId(userId)

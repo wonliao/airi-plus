@@ -13,12 +13,15 @@ import { getAuthToken } from './auth'
 import { SERVER_URL } from './server'
 
 export const OPENAI_SUBSCRIPTION_AUTH_STORAGE_KEY = 'auth/v1/providers/openai-subscription'
+export const OPENAI_SUBSCRIPTION_SESSION_STORAGE_KEY = `${OPENAI_SUBSCRIPTION_AUTH_STORAGE_KEY}/session`
+export const OPENAI_SUBSCRIPTION_SESSION_HEADER = 'X-OpenAI-Subscription-Session'
 export const OPENAI_SUBSCRIPTION_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann'
 export const OPENAI_SUBSCRIPTION_ISSUER = 'https://auth.openai.com'
 export const OPENAI_SUBSCRIPTION_SERVER_PROXY_PATH = '/api/v1/openai-subscription/proxy'
 export const OPENAI_SUBSCRIPTION_SERVER_STATUS_PATH = '/api/v1/openai-subscription/status'
 export const OPENAI_SUBSCRIPTION_SERVER_OAUTH_START_PATH = '/api/v1/openai-subscription/oauth/start'
 export const OPENAI_SUBSCRIPTION_SERVER_LOGOUT_PATH = '/api/v1/openai-subscription/logout'
+export const OPENAI_SUBSCRIPTION_LOCAL_BRIDGE_URL = 'http://localhost:6112'
 export const OPENAI_SUBSCRIPTION_CODEX_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
 export const OPENAI_SUBSCRIPTION_ALLOWED_MODELS = [
   'gpt-5.1-codex',
@@ -30,6 +33,7 @@ export const OPENAI_SUBSCRIPTION_ALLOWED_MODELS = [
   'gpt-5.4',
   'gpt-5.4-mini',
 ] as const
+const OPENAI_SUBSCRIPTION_SESSION_ID_PATTERN = /^[\w-]{16,128}$/
 
 export interface OpenAISubscriptionTokens {
   accessToken: string
@@ -71,17 +75,65 @@ function getStoredAiriAuthToken(): string | null {
   return getAuthToken()
 }
 
+function createOpenAISubscriptionSessionId(): string {
+  const crypto = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto
+  if (crypto?.randomUUID)
+    return crypto.randomUUID()
+
+  return Array.from({ length: 32 }).fill(Math.floor(Math.random() * 16).toString(16)).join('')
+}
+
+function getOpenAISubscriptionSessionId(): string {
+  const localStorage = getLocalStorage()
+  const stored = localStorage?.getItem(OPENAI_SUBSCRIPTION_SESSION_STORAGE_KEY)
+  if (stored && OPENAI_SUBSCRIPTION_SESSION_ID_PATTERN.test(stored))
+    return stored
+
+  const sessionId = createOpenAISubscriptionSessionId()
+  localStorage?.setItem(OPENAI_SUBSCRIPTION_SESSION_STORAGE_KEY, sessionId)
+  return sessionId
+}
+
+function getOpenAISubscriptionServerBaseUrl(): string {
+  const configuredUrl = import.meta.env.VITE_OPENAI_SUBSCRIPTION_SERVER_URL
+  if (configuredUrl)
+    return configuredUrl
+
+  const location = (globalThis as { location?: Location }).location
+  if (location && ['localhost', '127.0.0.1', '::1'].includes(location.hostname))
+    return OPENAI_SUBSCRIPTION_LOCAL_BRIDGE_URL
+
+  return SERVER_URL
+}
+
 function createOpenAISubscriptionServerUrl(path: string): URL {
-  return new URL(path, SERVER_URL)
+  return new URL(path, getOpenAISubscriptionServerBaseUrl())
+}
+
+async function fetchOpenAISubscriptionServer(path: string, init: RequestInit): Promise<Response> {
+  const url = createOpenAISubscriptionServerUrl(path)
+  try {
+    return await globalThis.fetch(url, init)
+  }
+  catch (error) {
+    if (url.origin === OPENAI_SUBSCRIPTION_LOCAL_BRIDGE_URL) {
+      throw new Error(`OpenAI subscription local bridge is not running at ${OPENAI_SUBSCRIPTION_LOCAL_BRIDGE_URL}`)
+    }
+
+    throw error
+  }
 }
 
 function createOpenAISubscriptionServerHeaders(headersInit?: RequestInit['headers']): Headers {
   const headers = new Headers(headersInit)
   const token = getStoredAiriAuthToken()
-  if (!token)
-    throw new Error('Sign in to AIRI before connecting OpenAI subscription')
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+  else {
+    headers.set(OPENAI_SUBSCRIPTION_SESSION_HEADER, getOpenAISubscriptionSessionId())
+  }
 
-  headers.set('Authorization', `Bearer ${token}`)
   return headers
 }
 
@@ -230,7 +282,7 @@ async function createWebOpenAISubscriptionResponse(input: string | Request | URL
   })
   const body = await resolveRequestBody(request)
 
-  return globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_PROXY_PATH), {
+  return fetchOpenAISubscriptionServer(OPENAI_SUBSCRIPTION_SERVER_PROXY_PATH, {
     method: 'POST',
     headers,
     credentials: 'omit',
@@ -240,7 +292,7 @@ async function createWebOpenAISubscriptionResponse(input: string | Request | URL
 
 export async function fetchOpenAISubscriptionStatus(): Promise<OpenAISubscriptionServerStatus> {
   const headers = createOpenAISubscriptionServerHeaders()
-  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_STATUS_PATH), {
+  const response = await fetchOpenAISubscriptionServer(OPENAI_SUBSCRIPTION_SERVER_STATUS_PATH, {
     method: 'GET',
     headers,
     credentials: 'omit',
@@ -261,7 +313,7 @@ export async function startOpenAISubscriptionLogin(): Promise<string> {
   const headers = createOpenAISubscriptionServerHeaders({
     'Content-Type': 'application/json',
   })
-  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_OAUTH_START_PATH), {
+  const response = await fetchOpenAISubscriptionServer(OPENAI_SUBSCRIPTION_SERVER_OAUTH_START_PATH, {
     method: 'POST',
     headers,
     credentials: 'omit',
@@ -289,7 +341,7 @@ export async function startOpenAISubscriptionLogin(): Promise<string> {
 
 export async function logoutOpenAISubscription(): Promise<void> {
   const headers = createOpenAISubscriptionServerHeaders()
-  const response = await globalThis.fetch(createOpenAISubscriptionServerUrl(OPENAI_SUBSCRIPTION_SERVER_LOGOUT_PATH), {
+  const response = await fetchOpenAISubscriptionServer(OPENAI_SUBSCRIPTION_SERVER_LOGOUT_PATH, {
     method: 'POST',
     headers,
     credentials: 'omit',

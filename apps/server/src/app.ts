@@ -41,7 +41,7 @@ import { createCharacterRoutes } from './routes/characters'
 import { createChatWsHandlers } from './routes/chat-ws'
 import { createChatRoutes } from './routes/chats'
 import { createFluxRoutes } from './routes/flux'
-import { createOpenAISubscriptionRoutes } from './routes/openai-subscription'
+import { createOpenAISubscriptionRoutes, handleOpenAISubscriptionOAuthCallback } from './routes/openai-subscription'
 import { createV1CompletionsRoutes } from './routes/openai/v1'
 import { createProviderRoutes } from './routes/providers'
 import { createStripeRoutes } from './routes/stripe'
@@ -194,6 +194,16 @@ export async function buildApp(deps: AppDeps) {
     .route('/api/v1/openai-subscription', createOpenAISubscriptionRoutes({
       accountService: deps.openAISubscriptionAccountService,
       env: deps.env,
+      redis: deps.redis,
+    }))
+
+    /**
+     * Local OpenAI subscription OAuth callback. OpenAI's desktop-style client
+     * redirects to this fixed loopback URL, so the local API also serves it
+     * when Docker maps localhost:1455 to the server container.
+     */
+    .get('/auth/callback', c => handleOpenAISubscriptionOAuthCallback(c, {
+      accountService: deps.openAISubscriptionAccountService,
       redis: deps.redis,
     }))
 

@@ -81,6 +81,7 @@ describe('openai subscription auth helpers', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.stubGlobal('localStorage', createLocalStorageMock())
+    vi.stubGlobal('location', undefined)
     vi.stubGlobal('fetch', vi.fn())
     localStorage.clear()
     getAuthTokenMock.mockReturnValue('airi-token')
@@ -192,6 +193,25 @@ describe('openai subscription auth helpers', () => {
     expect(localStorage.getItem(OPENAI_SUBSCRIPTION_AUTH_STORAGE_KEY)).toBeNull()
   })
 
+  it('proxies web fetch through a subscription bridge without AIRI auth', async () => {
+    getAuthTokenMock.mockReturnValue(null)
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response('{"ok":true}', { status: 200 }))
+
+    const response = await createOpenAISubscriptionFetch()('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      body: '{"model":"gpt-5.4"}',
+    })
+
+    expect(await response.json()).toEqual({ ok: true })
+    const [, init] = fetchMock.mock.calls[0]
+    const headers = new Headers(init?.headers)
+    expect(headers.has('Authorization')).toBe(false)
+    expect(headers.get('X-OpenAI-Subscription-Session')).toMatch(/^[\w-]{16,128}$/)
+  })
+
   it('fetches web subscription status with AIRI auth', async () => {
     isStageTamagotchiMock.mockReturnValue(false)
     isStageWebMock.mockReturnValue(true)
@@ -213,6 +233,20 @@ describe('openai subscription auth helpers', () => {
     expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer airi-token')
   })
 
+  it('fetches web subscription status without AIRI auth', async () => {
+    getAuthTokenMock.mockReturnValue(null)
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ connected: false }), { status: 200 }))
+
+    await expect(fetchOpenAISubscriptionStatus()).resolves.toEqual({ connected: false })
+    const [, init] = fetchMock.mock.calls[0]
+    const headers = new Headers(init?.headers)
+    expect(headers.has('Authorization')).toBe(false)
+    expect(headers.get('X-OpenAI-Subscription-Session')).toMatch(/^[\w-]{16,128}$/)
+  })
+
   it('starts and logs out of web subscription sessions through the server', async () => {
     isStageTamagotchiMock.mockReturnValue(false)
     isStageWebMock.mockReturnValue(true)
@@ -228,6 +262,49 @@ describe('openai subscription auth helpers', () => {
     expect(fetchMock.mock.calls[0][1]?.method).toBe('POST')
     expect(String(fetchMock.mock.calls[1][0])).toBe('https://airi.test/api/v1/openai-subscription/logout')
     expect(fetchMock.mock.calls[1][1]?.method).toBe('POST')
+  })
+
+  it('starts web OpenAI subscription login without AIRI auth', async () => {
+    getAuthTokenMock.mockReturnValue(null)
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ authorizationUrl: 'https://auth.openai.com/oauth' }), { status: 200 }))
+
+    await expect(startOpenAISubscriptionLogin()).resolves.toBe('https://auth.openai.com/oauth')
+    const [, init] = fetchMock.mock.calls[0]
+    const headers = new Headers(init?.headers)
+    expect(headers.has('Authorization')).toBe(false)
+    expect(headers.get('X-OpenAI-Subscription-Session')).toMatch(/^[\w-]{16,128}$/)
+  })
+
+  it('uses the local OpenAI subscription bridge for localhost stage web', async () => {
+    getAuthTokenMock.mockReturnValue(null)
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+    vi.stubGlobal('location', {
+      hostname: 'localhost',
+      href: 'http://localhost:5173/settings/providers/chat/openai-subscription',
+    })
+    const fetchMock = vi.mocked(fetch)
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ authorizationUrl: 'https://auth.openai.com/oauth' }), { status: 200 }))
+
+    await expect(startOpenAISubscriptionLogin()).resolves.toBe('https://auth.openai.com/oauth')
+    expect(String(fetchMock.mock.calls[0][0])).toBe('http://localhost:6112/api/v1/openai-subscription/oauth/start')
+    expect(new Headers(fetchMock.mock.calls[0][1]?.headers).get('X-OpenAI-Subscription-Session')).toMatch(/^[\w-]{16,128}$/)
+  })
+
+  it('reports when the local OpenAI subscription bridge is not running', async () => {
+    getAuthTokenMock.mockReturnValue(null)
+    isStageTamagotchiMock.mockReturnValue(false)
+    isStageWebMock.mockReturnValue(true)
+    vi.stubGlobal('location', {
+      hostname: 'localhost',
+      href: 'http://localhost:5173/settings/providers/chat/openai-subscription',
+    })
+    vi.mocked(fetch).mockRejectedValue(new TypeError('Failed to fetch'))
+
+    await expect(startOpenAISubscriptionLogin()).rejects.toThrow('OpenAI subscription local bridge is not running at http://localhost:6112')
   })
 
   it('checks login through desktop storage or web server status by runtime', async () => {

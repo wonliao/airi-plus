@@ -43,7 +43,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
   })
 
   // Check if first-time setup should be shown
-  const skipOnboardingPath = ['/auth/sign-in', '/auth/callback']
+  const skipOnboardingPath = ['/auth/sign-in', '/auth/callback', '/settings/providers/chat/openai-subscription']
   const needsOnboarding = computed(() =>
     !authStore.isAuthenticated
     && !authStore.token

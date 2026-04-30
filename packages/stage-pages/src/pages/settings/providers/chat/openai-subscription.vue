@@ -12,21 +12,17 @@ import {
 
   startOpenAISubscriptionLogin,
 } from '@proj-airi/stage-ui/libs/openai-subscription-auth'
-import { useAuthStore } from '@proj-airi/stage-ui/stores/auth'
 import { useConsciousnessStore } from '@proj-airi/stage-ui/stores/modules/consciousness'
 import { useProvidersStore } from '@proj-airi/stage-ui/stores/providers'
 import { Button, Callout } from '@proj-airi/ui'
-import { storeToRefs } from 'pinia'
-import { computed, onMounted, shallowRef, watch } from 'vue'
+import { computed, onMounted, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
 const { t } = useI18n()
-const authStore = useAuthStore()
 const providersStore = useProvidersStore()
 const consciousnessStore = useConsciousnessStore()
-const { isAuthenticated, needsLogin } = storeToRefs(authStore)
 
 const providerId = 'openai-subscription'
 const providerMetadata = providersStore.getProviderMetadata(providerId)
@@ -40,12 +36,6 @@ const isConnected = computed(() => status.value?.connected === true || !!provide
 
 async function refreshStatus() {
   actionError.value = ''
-
-  if (!isAuthenticated.value) {
-    status.value = null
-    providersStore.setProviderUnconfigured(providerId)
-    return
-  }
 
   isRefreshingStatus.value = true
   try {
@@ -67,16 +57,7 @@ async function refreshStatus() {
   }
 }
 
-function handleAiriLogin() {
-  needsLogin.value = true
-}
-
 async function handleLogin() {
-  if (!isAuthenticated.value) {
-    handleAiriLogin()
-    return
-  }
-
   actionError.value = ''
   isStartingLogin.value = true
   try {
@@ -115,10 +96,6 @@ async function handleUseProvider() {
 }
 
 onMounted(refreshStatus)
-
-watch(isAuthenticated, () => {
-  void refreshStatus()
-})
 </script>
 
 <template>
@@ -138,23 +115,7 @@ watch(isAuthenticated, () => {
           <p>{{ actionError }}</p>
         </Callout>
 
-        <div v-if="!isAuthenticated" :class="['flex', 'flex-col', 'gap-4']">
-          <Callout theme="primary">
-            <template #label>
-              {{ t('settings.dialogs.onboarding.official.title') }}
-            </template>
-            <div :class="['flex', 'flex-col', 'gap-3']">
-              <p>{{ t('settings.dialogs.onboarding.loginPrompt') }}</p>
-              <Button
-                :label="t('settings.dialogs.onboarding.loginAction')"
-                :loading="isStartingLogin"
-                @click="handleAiriLogin"
-              />
-            </div>
-          </Callout>
-        </div>
-
-        <div v-else-if="!isConnected" :class="['flex', 'flex-col', 'gap-4']">
+        <div v-if="!isConnected" :class="['flex', 'flex-col', 'gap-4']">
           <Callout theme="primary">
             <template #label>
               {{ t('settings.pages.providers.provider.openai-subscription.sign-in.title') }}

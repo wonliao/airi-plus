@@ -1,3 +1,4 @@
+import type { Context } from 'hono'
 import type Redis from 'ioredis'
 
 import type { Env } from '../../libs/env'
@@ -8,7 +9,6 @@ import { errorMessageFrom } from '@moeru/std'
 import { Hono } from 'hono'
 import { safeParse } from 'valibot'
 
-import { authGuard } from '../../middlewares/auth'
 import { loadOpenAISubscriptionCodexHelpers } from '../../services/openai-subscription-codex'
 import { OpenAISubscriptionTokenEncryptionError } from '../../services/openai-subscription-crypto'
 import { loadOpenAISubscriptionPkceHelpers } from '../../services/openai-subscription-pkce'
@@ -26,6 +26,10 @@ const OPENAI_SUBSCRIPTION_ISSUER = 'https://auth.openai.com'
 const OPENAI_SUBSCRIPTION_CODEX_ENDPOINT = 'https://chatgpt.com/backend-api/codex/responses'
 const OPENAI_SUBSCRIPTION_STATE_TTL_SECONDS = 10 * 60
 const OPENAI_SUBSCRIPTION_REFRESH_SKEW_MS = 60 * 1000
+const OPENAI_SUBSCRIPTION_SESSION_HEADER = 'X-OpenAI-Subscription-Session'
+const OPENAI_SUBSCRIPTION_LOCAL_CALLBACK_URL = 'http://localhost:1455/auth/callback'
+const OPENAI_SUBSCRIPTION_LOCAL_USER_PREFIX = 'openai-subscription-session:'
+const OPENAI_SUBSCRIPTION_SESSION_ID_PATTERN = /^[\w-]{16,128}$/
 
 interface OpenAISubscriptionOAuthState {
   codeVerifier: string
@@ -43,6 +47,22 @@ interface OpenAISubscriptionTokenResponse {
 
 function oauthStateKey(state: string) {
   return `openai-subscription:oauth-state:${state}`
+}
+
+async function resolveOpenAISubscriptionUserId(c: Context<HonoEnv>, accountService: OpenAISubscriptionAccountService) {
+  const user = c.get('user')
+  if (user) {
+    return user.id
+  }
+
+  const sessionId = c.req.header(OPENAI_SUBSCRIPTION_SESSION_HEADER)
+  if (!sessionId || !OPENAI_SUBSCRIPTION_SESSION_ID_PATTERN.test(sessionId)) {
+    throw createUnauthorizedError('OpenAI subscription session is missing')
+  }
+
+  const userId = `${OPENAI_SUBSCRIPTION_LOCAL_USER_PREFIX}${sessionId}`
+  await accountService.ensureLocalSubscriptionUser(userId)
+  return userId
 }
 
 function requireTokenEncryption(accountService: OpenAISubscriptionAccountService) {
@@ -152,6 +172,11 @@ function buildAuthorizeUrl(redirectUri: string, state: string, codeChallenge: st
 }
 
 function getOpenAISubscriptionRedirectUri(env: Env) {
+  const apiServerUrl = new URL(env.API_SERVER_URL)
+  if (apiServerUrl.hostname === 'localhost' || apiServerUrl.hostname === '127.0.0.1' || apiServerUrl.hostname === '[::1]') {
+    return OPENAI_SUBSCRIPTION_LOCAL_CALLBACK_URL
+  }
+
   return new URL('/api/v1/openai-subscription/oauth/callback', env.API_SERVER_URL).toString()
 }
 
@@ -220,16 +245,66 @@ function safeProxyResponseHeaders(response: Response) {
   return headers
 }
 
+export async function handleOpenAISubscriptionOAuthCallback(c: Context<HonoEnv>, input: {
+  accountService: OpenAISubscriptionAccountService
+  redis: Redis
+}) {
+  requireTokenEncryption(input.accountService)
+
+  const result = safeParse(OAuthCallbackQuerySchema, c.req.query())
+  if (!result.success) {
+    throw createBadRequestError('Invalid OpenAI subscription OAuth callback', 'OPENAI_SUBSCRIPTION_INVALID_CALLBACK', result.issues)
+  }
+
+  const statePayload = await input.redis.get(oauthStateKey(result.output.state))
+  await input.redis.del(oauthStateKey(result.output.state))
+  if (!statePayload) {
+    throw createBadRequestError('OpenAI subscription OAuth state is missing or expired', 'OPENAI_SUBSCRIPTION_OAUTH_STATE_EXPIRED')
+  }
+
+  const oauthState = JSON.parse(statePayload) as OpenAISubscriptionOAuthState
+  const user = c.get('user')
+  if (user && oauthState.userId !== user.id) {
+    throw createUnauthorizedError('OpenAI subscription OAuth state belongs to another user')
+  }
+
+  const tokens = await exchangeOpenAISubscriptionCode({
+    code: result.output.code,
+    codeVerifier: oauthState.codeVerifier,
+    redirectUri: oauthState.redirectUri,
+  })
+
+  if (typeof tokens.access_token !== 'string' || typeof tokens.refresh_token !== 'string') {
+    throw createBadRequestError('OpenAI subscription token response is missing required tokens', 'OPENAI_SUBSCRIPTION_INVALID_TOKEN_RESPONSE')
+  }
+  const accessToken = tokens.access_token
+  const refreshToken = tokens.refresh_token
+
+  const helpers = await loadOpenAISubscriptionCodexHelpers()
+  const account = await withTokenEncryptionErrors(() => input.accountService.upsertAccountForUser({
+    userId: oauthState.userId,
+    accessToken,
+    refreshToken,
+    accessTokenExpiresAt: new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000),
+    chatgptAccountId: helpers.extractOpenAISubscriptionAccountId({
+      access_token: accessToken,
+      id_token: tokens.id_token,
+    }) ?? null,
+  }))
+
+  return c.redirect(appendOpenAISubscriptionCallbackResult(oauthState.returnTo, account != null))
+}
+
 export function createOpenAISubscriptionRoutes(input: {
   accountService: OpenAISubscriptionAccountService
   env: Env
   redis: Redis
 }) {
   return new Hono<HonoEnv>()
-    .post('/oauth/start', authGuard, async (c) => {
+    .post('/oauth/start', async (c) => {
       requireTokenEncryption(input.accountService)
 
-      const user = c.get('user')!
+      const userId = await resolveOpenAISubscriptionUserId(c, input.accountService)
       const startBody = safeParse(OAuthStartBodySchema, await readOptionalJsonBody(c.req.raw))
       if (!startBody.success) {
         throw createBadRequestError('Invalid OpenAI subscription OAuth start payload', 'OPENAI_SUBSCRIPTION_INVALID_START_PAYLOAD', startBody.issues)
@@ -244,7 +319,7 @@ export function createOpenAISubscriptionRoutes(input: {
 
       await input.redis.set(
         oauthStateKey(state),
-        JSON.stringify({ userId: user.id, codeVerifier, redirectUri, returnTo } satisfies OpenAISubscriptionOAuthState),
+        JSON.stringify({ userId, codeVerifier, redirectUri, returnTo } satisfies OpenAISubscriptionOAuthState),
         'EX',
         OPENAI_SUBSCRIPTION_STATE_TTL_SECONDS,
       )
@@ -258,55 +333,12 @@ export function createOpenAISubscriptionRoutes(input: {
     })
 
     .get('/oauth/callback', async (c) => {
-      requireTokenEncryption(input.accountService)
-
-      const user = c.get('user')!
-      const result = safeParse(OAuthCallbackQuerySchema, c.req.query())
-      if (!result.success) {
-        throw createBadRequestError('Invalid OpenAI subscription OAuth callback', 'OPENAI_SUBSCRIPTION_INVALID_CALLBACK', result.issues)
-      }
-
-      const statePayload = await input.redis.get(oauthStateKey(result.output.state))
-      await input.redis.del(oauthStateKey(result.output.state))
-      if (!statePayload) {
-        throw createBadRequestError('OpenAI subscription OAuth state is missing or expired', 'OPENAI_SUBSCRIPTION_OAUTH_STATE_EXPIRED')
-      }
-
-      const oauthState = JSON.parse(statePayload) as OpenAISubscriptionOAuthState
-      if (oauthState.userId !== user.id) {
-        throw createUnauthorizedError('OpenAI subscription OAuth state belongs to another user')
-      }
-
-      const tokens = await exchangeOpenAISubscriptionCode({
-        code: result.output.code,
-        codeVerifier: oauthState.codeVerifier,
-        redirectUri: oauthState.redirectUri,
-      })
-
-      if (typeof tokens.access_token !== 'string' || typeof tokens.refresh_token !== 'string') {
-        throw createBadRequestError('OpenAI subscription token response is missing required tokens', 'OPENAI_SUBSCRIPTION_INVALID_TOKEN_RESPONSE')
-      }
-      const accessToken = tokens.access_token
-      const refreshToken = tokens.refresh_token
-
-      const helpers = await loadOpenAISubscriptionCodexHelpers()
-      const account = await withTokenEncryptionErrors(() => input.accountService.upsertAccountForUser({
-        userId: oauthState.userId,
-        accessToken,
-        refreshToken,
-        accessTokenExpiresAt: new Date(Date.now() + (tokens.expires_in ?? 3600) * 1000),
-        chatgptAccountId: helpers.extractOpenAISubscriptionAccountId({
-          access_token: accessToken,
-          id_token: tokens.id_token,
-        }) ?? null,
-      }))
-
-      return c.redirect(appendOpenAISubscriptionCallbackResult(oauthState.returnTo, account != null))
+      return handleOpenAISubscriptionOAuthCallback(c, input)
     })
 
-    .get('/status', authGuard, async (c) => {
-      const user = c.get('user')!
-      const account = await input.accountService.getStoredAccountByUserId(user.id)
+    .get('/status', async (c) => {
+      const userId = await resolveOpenAISubscriptionUserId(c, input.accountService)
+      const account = await input.accountService.getStoredAccountByUserId(userId)
       return c.json({
         connected: account != null,
         chatgptAccountId: account?.chatgptAccountId ?? null,
@@ -315,22 +347,22 @@ export function createOpenAISubscriptionRoutes(input: {
       })
     })
 
-    .post('/logout', authGuard, async (c) => {
-      const user = c.get('user')!
-      await input.accountService.deleteAccountByUserId(user.id)
+    .post('/logout', async (c) => {
+      const userId = await resolveOpenAISubscriptionUserId(c, input.accountService)
+      await input.accountService.deleteAccountByUserId(userId)
       return c.body(null, 204)
     })
 
-    .post('/proxy', authGuard, async (c) => {
+    .post('/proxy', async (c) => {
       requireTokenEncryption(input.accountService)
 
-      const user = c.get('user')!
+      const userId = await resolveOpenAISubscriptionUserId(c, input.accountService)
       const result = safeParse(ProxyBodySchema, await readOptionalJsonBody(c.req.raw))
       if (!result.success) {
         throw createBadRequestError('Invalid OpenAI subscription proxy payload', 'OPENAI_SUBSCRIPTION_INVALID_PROXY_PAYLOAD', result.issues)
       }
 
-      const account = await withTokenEncryptionErrors(() => input.accountService.getAccountByUserId(user.id))
+      const account = await withTokenEncryptionErrors(() => input.accountService.getAccountByUserId(userId))
       if (!account) {
         throw createNotFoundError('OpenAI subscription account is not connected')
       }

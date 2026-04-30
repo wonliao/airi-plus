@@ -125,6 +125,37 @@ describe('openAI subscription routes', () => {
     expect(redis.values.get(`openai-subscription:oauth-state:${body.state}`)).toContain('"userId":"user-1"')
   })
 
+  it('starts oauth for a local OpenAI subscription session', async () => {
+    const redis = new FakeRedis()
+    const { app } = createTestApp({ db, encryptionKey, redis })
+
+    const res = await app.fetch(new Request('http://localhost/api/v1/openai-subscription/oauth/start', {
+      method: 'POST',
+      headers: {
+        'X-OpenAI-Subscription-Session': 'local-session-123456',
+      },
+    }))
+
+    expect(res.status).toBe(200)
+    const body = await res.json() as { authorizationUrl: string, state: string }
+    expect(body.authorizationUrl).toContain('https://auth.openai.com/oauth/authorize')
+    expect(body.authorizationUrl).toContain('redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback')
+    expect(redis.values.get(`openai-subscription:oauth-state:${body.state}`)).toContain('"userId":"openai-subscription-session:local-session-123456"')
+  })
+
+  it('returns local subscription status by session header', async () => {
+    const { app } = createTestApp({ db, encryptionKey })
+
+    const res = await app.fetch(new Request('http://localhost/api/v1/openai-subscription/status', {
+      headers: {
+        'X-OpenAI-Subscription-Session': 'local-session-123456',
+      },
+    }))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ connected: false })
+  })
+
   it('handles oauth callback and stores encrypted tokens', async () => {
     const redis = new FakeRedis()
     redis.values.set('openai-subscription:oauth-state:state-1', JSON.stringify({
@@ -156,6 +187,38 @@ describe('openAI subscription routes', () => {
     expect(stored?.accessTokenCiphertext).toMatch(/^v1:/)
     expect(stored?.accessTokenCiphertext).not.toContain('acct-1')
     expect(redis.values.has('openai-subscription:oauth-state:state-1')).toBe(false)
+  })
+
+  it('handles local session oauth callback without app authentication', async () => {
+    const redis = new FakeRedis()
+    redis.values.set('openai-subscription:oauth-state:state-local', JSON.stringify({
+      userId: 'openai-subscription-session:local-session-123456',
+      codeVerifier: 'verifier-local',
+      redirectUri: 'http://localhost:1455/auth/callback',
+      returnTo: 'http://localhost:5173/settings/providers/chat/openai-subscription',
+    }))
+
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      access_token: encodeJwt({ chatgpt_account_id: 'acct-local' }),
+      refresh_token: 'refresh-token',
+      expires_in: 3600,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+
+    const { app, accountService } = createTestApp({ db, encryptionKey, redis })
+    await accountService.ensureLocalSubscriptionUser('openai-subscription-session:local-session-123456')
+
+    const res = await app.fetch(
+      new Request('http://localhost/api/v1/openai-subscription/oauth/callback?code=code-local&state=state-local'),
+    )
+
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('http://localhost:5173/settings/providers/chat/openai-subscription?openaiSubscription=connected')
+    const stored = await accountService.getStoredAccountByUserId('openai-subscription-session:local-session-123456')
+    expect(stored?.accessTokenCiphertext).toMatch(/^v1:/)
+    expect(redis.values.has('openai-subscription:oauth-state:state-local')).toBe(false)
   })
 
   it('proxies requests through the stored subscription account', async () => {
